@@ -141,6 +141,24 @@ describe('http-client', () => {
     expect(result.data?.offline).toBe(true);
   });
 
+  it('does not use stale offline inventory fallback older than TTL', async () => {
+    const client = new TestHttpClient('https://example.com');
+    jest.spyOn(offlineCache, 'getInventoryEnvelope').mockResolvedValue({
+      items: [{ id: 'inv-old', name: '오래된 재고', quantity: 1, unit: '개' }],
+      cache_timestamp: Date.now() - 25 * 60 * 60 * 1000,
+    });
+    global.fetch = jest.fn().mockRejectedValue(new Error('Failed to fetch')) as never;
+
+    const result = await client.requestPublic<InventoryListResponse>('/inventory?sort_by=expiry_date', {
+      method: 'GET',
+      skipInit: true,
+    });
+
+    expect(result.offline).toBeUndefined();
+    expect(result.data).toBeUndefined();
+    expect(result.error).toContain('서버에 연결하지 못했어요');
+  });
+
   it('includes idempotency key header on mutation request', async () => {
     const client = new TestHttpClient('https://example.com');
     global.fetch = jest.fn().mockResolvedValue({

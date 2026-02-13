@@ -12,6 +12,7 @@ const APP_TOKEN =
 const REQUEST_TIMEOUT_MS = 20000;
 const DEVICE_ID_FILE = 'prometheus-device-id.txt';
 const MAX_CLIENT_CACHE_ENTRIES = 200;
+const OFFLINE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface ApiResponse<T> {
   data?: T;
@@ -320,7 +321,7 @@ export class HttpClient {
             let cacheTimestamp: number | null = null;
             if (endpoint.startsWith('/inventory')) {
               const inventoryEnvelope = await offlineCache.getInventoryEnvelope();
-              if (inventoryEnvelope) {
+              if (inventoryEnvelope && this.isOfflineCacheFresh(inventoryEnvelope.cache_timestamp)) {
                 cacheTimestamp = inventoryEnvelope.cache_timestamp;
                 offlineData = {
                   items: inventoryEnvelope.items,
@@ -334,13 +335,13 @@ export class HttpClient {
               }
             } else if (endpoint.startsWith('/recipes/favorites')) {
               const favoritesEnvelope = await offlineCache.getFavoritesEnvelope();
-              if (favoritesEnvelope) {
+              if (favoritesEnvelope && this.isOfflineCacheFresh(favoritesEnvelope.cache_timestamp)) {
                 cacheTimestamp = favoritesEnvelope.cache_timestamp;
                 offlineData = favoritesEnvelope.recipes;
               }
             } else if (endpoint.startsWith('/shopping')) {
               const shoppingEnvelope = await offlineCache.getShoppingEnvelope();
-              if (shoppingEnvelope) {
+              if (shoppingEnvelope && this.isOfflineCacheFresh(shoppingEnvelope.cache_timestamp)) {
                 cacheTimestamp = shoppingEnvelope.cache_timestamp;
                 offlineData = this.normalizeShoppingFallback(shoppingEnvelope.payload);
               }
@@ -539,6 +540,11 @@ export class HttpClient {
       if (!oldestKey) break;
       this.cache.delete(oldestKey);
     }
+  }
+
+  private isOfflineCacheFresh(cacheTimestamp: number | null | undefined): boolean {
+    if (!Number.isFinite(cacheTimestamp)) return false;
+    return Date.now() - Number(cacheTimestamp) <= OFFLINE_CACHE_TTL_MS;
   }
 
   private normalizeShoppingFallback(data: unknown): unknown {

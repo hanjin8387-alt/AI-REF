@@ -472,7 +472,7 @@
   - First app test run failed because `useRouter` mock was missing in `inventory-screen` test; added minimal mock and reran successfully.
 
 ## Commit P2-11: perf(ux): PS-006 add feed transition animation
-- Commit: `(pending)`
+- Commit: `6853943`
 - Files:
   - `prometheus-app/app/(tabs)/index.tsx`
 - Commands:
@@ -483,3 +483,18 @@
   - Perf smoke: `PASS` (`/health avg=85.1ms p95=99.8ms`, `/inventory avg=85.2ms p95=92.2ms`)
 - Notes:
   - Added a lightweight fade+slide transition layer for home feed content to smooth mode/screen updates.
+
+## Commit P2-12: perf(reliability): PRL-003 enforce offline cache TTL
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/services/http-client.ts`
+  - `prometheus-app/__tests__/http-client.test.ts`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 29 tests`)
+  - Perf smoke: `PASS` (`/health avg=88.8ms p95=130.6ms`, `/inventory avg=85.2ms p95=91.2ms`)
+- Notes:
+  - Added a 24-hour TTL gate for offline fallback data in `http-client`.
+  - Added regression test that stale offline inventory cache is ignored.
