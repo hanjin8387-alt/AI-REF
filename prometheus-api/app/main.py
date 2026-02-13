@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,7 @@ from .core.database import get_db
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
+REQUEST_ID_HEADER = "X-Request-ID"
 
 
 @asynccontextmanager
@@ -87,6 +89,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
+    request.state.request_id = request_id
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request failed method=%s path=%s request_id=%s",
+            request.method,
+            request.url.path,
+            request_id,
+        )
+        raise
+
+    response.headers[REQUEST_ID_HEADER] = request_id
+    return response
+
 
 app.include_router(auth_router)
 app.include_router(scans_router)
