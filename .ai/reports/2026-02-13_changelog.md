@@ -10,3 +10,12 @@
 - Test result:
   - `1 test collected`, exit code `0`.
   - First run failed with `no tests collected`; fixed by adding a minimal smoke test and reran successfully.
+
+## A-7 — test(api): TE-001 add security module unit tests
+- Code changes:
+  - Added `prometheus-api/tests/test_security.py`.
+  - Covered `require_app_token` (valid/invalid/missing), `get_device_id` (valid/short/long/whitelist), and `_require_admin_token` behavior.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_security.py -v` (environment fallback: `py -m pytest tests/test_security.py -v`)
+- Test result:
+  - `10 passed`, exit code `0`.
