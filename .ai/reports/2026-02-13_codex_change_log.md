@@ -360,3 +360,24 @@
   - Delta: `0MB`
 - Notes:
   - Removed direct `python-dotenv` from `requirements.txt`; it is already pulled transitively by `pydantic-settings`.
+
+## Commit P2-5: perf(build): BS-005 split runtime and dev requirements
+- Commit: `(pending)`
+- Files:
+  - `prometheus-api/requirements.txt`
+  - `prometheus-api/requirements-dev.txt`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark build: `$env:PATH='C:\\Program Files\\Docker\\Docker\\resources\\bin;'+$env:PATH; docker build --no-cache -t prometheus-api:perf-ms ./prometheus-api`
+  - Benchmark size: `docker images prometheus-api:perf-ms --format "{{.Repository}}:{{.Tag}} {{.Size}}"`
+- Result:
+  - Tests: `PASS` (`46 passed`)
+  - Build: `PASS`
+  - Benchmark: `PASS` (`prometheus-api:perf-ms 547MB`)
+- Metrics:
+  - Before: `prometheus-api:perf-ms 552MB`
+  - After: `prometheus-api:perf-ms 547MB`
+  - Delta: `-5MB`
+- Notes:
+  - Runtime dependencies stay in `requirements.txt`.
+  - Test-only packages moved to `requirements-dev.txt` to keep runtime image leaner.
