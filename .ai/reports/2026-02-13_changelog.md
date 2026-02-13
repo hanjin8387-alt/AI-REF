@@ -67,3 +67,15 @@
   - `cd prometheus-api && python -m pytest tests/test_services/test_recipe_cache.py -v` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `2 passed`, exit code `0`.
+
+## A-5 — security(api): CR-002 stream-validate upload size before full read
+- Code changes:
+  - Updated `prometheus-api/app/api/scans.py`:
+    - Replaced whole-file `await file.read()` flow with chunk-based reads.
+    - Added running byte-size validation during stream read.
+    - Kept early `413` rejection before full in-memory assembly when size exceeds limit.
+  - Added `prometheus-api/tests/test_scans.py` with upload-size limit test.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_scans.py -v -k "test_upload_size"` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `1 passed`, exit code `0`.
