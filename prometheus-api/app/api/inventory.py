@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from supabase import Client
 
+from ..core.db_columns import INVENTORY_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.security import get_device_id, require_app_token
 from ..schemas.schemas import (
@@ -39,7 +40,7 @@ async def get_inventory(
     device_id: str = Depends(get_device_id),
     db: Client = Depends(get_db),
 ):
-    query = db.table("inventory").select("*", count="exact").eq("device_id", device_id)
+    query = db.table("inventory").select(INVENTORY_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
 
     if category:
         query = query.eq("category", category)
@@ -127,7 +128,7 @@ async def update_inventory_item(
 ):
     existing = (
         db.table("inventory")
-        .select("*")
+        .select(INVENTORY_SELECT_COLUMNS)
         .eq("id", item_id)
         .eq("device_id", device_id)
         .single()
@@ -192,7 +193,7 @@ async def delete_inventory_item(
 ):
     existing_result = (
         db.table("inventory")
-        .select("*")
+        .select(INVENTORY_SELECT_COLUMNS)
         .eq("id", item_id)
         .eq("device_id", device_id)
         .limit(1)
@@ -244,7 +245,7 @@ async def restore_inventory_item(
 
     existing = (
         db.table("inventory")
-        .select("*")
+        .select(INVENTORY_SELECT_COLUMNS)
         .eq("device_id", device_id)
         .eq("name", name)
         .limit(1)

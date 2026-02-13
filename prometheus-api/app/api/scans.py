@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 from supabase import Client
 
 from ..core.config import get_settings
+from ..core.db_columns import SCAN_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.security import get_device_id, require_app_token
 from ..schemas.schemas import (
@@ -327,7 +328,7 @@ async def get_scan_result(
 ):
     result = (
         db.table("scans")
-        .select("*")
+        .select(SCAN_SELECT_COLUMNS)
         .eq("id", scan_id)
         .eq("device_id", device_id)
         .single()

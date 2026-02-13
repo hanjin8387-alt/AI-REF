@@ -207,3 +207,22 @@
   - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
 - Test result:
   - `1 passed`, exit code `0`.
+
+## B-12 ??perf(api): CR-004 replace SELECT * with explicit column selection
+- Code changes:
+  - Added centralized select-column constants: `prometheus-api/app/core/db_columns.py`.
+  - Replaced `select("*")` / `select("*", count=...)` with explicit columns in backend APIs:
+    - `prometheus-api/app/api/recipes.py`
+    - `prometheus-api/app/api/inventory.py`
+    - `prometheus-api/app/api/scans.py`
+    - `prometheus-api/app/api/notifications.py`
+    - `prometheus-api/app/api/stats.py`
+    - `prometheus-api/app/api/shopping.py`
+    - `prometheus-api/app/api/auth.py`
+  - Preserved count queries while narrowing selected fields to required columns.
+- Test command:
+  - `cd prometheus-api && python -m pytest -v` (environment fallback: `py -m pytest -v`)
+- Test result:
+  - First run failed due Python launcher invocation (`python -m pytest -v` not executable in this shell context).
+  - Reran with fallback command `py -m pytest -v`.
+  - `32 passed`, exit code `0`.
