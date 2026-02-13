@@ -217,7 +217,7 @@ async def add_favorite_recipe(
 
     if request.recipe:
         if request.recipe.id != recipe_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="레시피 ID가 일치하지 않습니다.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipe ID does not match the request body.")
         recipe = request.recipe
     else:
         recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
@@ -225,7 +225,7 @@ async def add_favorite_recipe(
     if recipe is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="생성형 추천 레시피를 저장하려면 레시피 데이터가 필요합니다.",
+            detail="Recipe payload is required to save generated recommendations.",
         )
 
     db.table("favorite_recipes").upsert(
@@ -294,7 +294,7 @@ async def get_cooking_history_detail(
         .execute()
     )
     if not result.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="요리 이력을 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cooking history entry not found.")
     return CookingHistoryItem(**result.data)
 
 
@@ -307,7 +307,7 @@ async def get_recipe(
 ):
     recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
     if not recipe:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="레시피를 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found.")
 
     favorite_ids = load_favorite_ids(db, device_id, [recipe_id])
     return recipe.model_copy(update={"is_favorite": recipe_id in favorite_ids})
@@ -322,11 +322,11 @@ async def complete_cooking(
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
     if request.servings <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="인분은 1 이상이어야 합니다.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Servings must be at least 1.")
 
     recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
     if not recipe:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="레시피를 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found.")
 
     deducted_items: list[dict] = []
     base_servings = recipe.servings if recipe.servings > 0 else 1
@@ -424,7 +424,7 @@ async def complete_cooking(
         logger.exception("complete cooking failed recipe_id=%s device_id=%s", recipe_id, device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="요리 완료 처리에 실패했습니다.",
+            detail="Failed to complete cooking transaction.",
         ) from exc
 
     recipe_cache.invalidate_device(device_id)

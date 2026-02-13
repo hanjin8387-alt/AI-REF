@@ -18,7 +18,7 @@ def test_upload_size_limit_exceeded_returns_413(client) -> None:
     )
 
     assert response.status_code == 413
-    assert "최대 1MB" in response.json()["detail"]
+    assert "Maximum allowed size is 1MB" in response.json()["detail"]
 
 
 def test_upload_scan_success_returns_completed_status(client, mock_gemini_service, mock_supabase) -> None:

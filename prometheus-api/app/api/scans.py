@@ -232,7 +232,7 @@ async def upload_scan(
         if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail="이미지 파일만 업로드할 수 있습니다.",
+                detail="Only image files are supported.",
             )
 
         mime_type = file.content_type or "image/jpeg"
@@ -247,7 +247,7 @@ async def upload_scan(
             if total_size > max_upload_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"이미지 용량이 너무 큽니다. 최대 {settings.max_upload_size_mb}MB까지 지원합니다.",
+                    detail=f"Image file is too large. Maximum allowed size is {settings.max_upload_size_mb}MB.",
                 )
             chunks.append(chunk)
         image_bytes = b"".join(chunks)
@@ -316,7 +316,7 @@ async def upload_scan(
 
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="스캔 분석에 실패했습니다.",
+            detail="Failed to analyze scan image.",
         ) from exc
 
 
@@ -336,7 +336,7 @@ async def get_scan_result(
     )
 
     if not result.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="스캔 결과를 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan result not found.")
 
     scan = result.data
     items = [FoodItem(**item) for item in (scan.get("items") or [])]

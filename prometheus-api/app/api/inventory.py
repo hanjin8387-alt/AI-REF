@@ -54,7 +54,7 @@ async def get_inventory(
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="sort_by는 expiry_date, name, created_at 중 하나여야 합니다.",
+            detail="sort_by must be one of: expiry_date, name, created_at.",
         )
 
     result = query.range(offset, offset + limit - 1).execute()
@@ -83,7 +83,7 @@ async def bulk_add_inventory(
     if not request.items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="최소 1개 이상의 항목이 필요합니다.",
+            detail="At least one item is required.",
         )
 
     raw_items = [
@@ -135,17 +135,17 @@ async def update_inventory_item(
         .execute()
     )
     if not existing.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="인벤토리 항목을 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
 
     updates: dict[str, object] = {}
     if request.name is not None:
         name = request.name.strip()
         if not name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이름은 비워둘 수 없습니다.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
         updates["name"] = name
     if request.quantity is not None:
         if request.quantity < 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수량은 0 이상이어야 합니다.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than or equal to 0.")
         updates["quantity"] = float(request.quantity)
     if request.unit is not None:
         unit = request.unit.strip()
@@ -156,7 +156,7 @@ async def update_inventory_item(
         updates["category"] = normalize_storage_category(request.category)
 
     if not updates:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수정할 필드가 없습니다.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update.")
 
     try:
         updated = (
@@ -168,10 +168,10 @@ async def update_inventory_item(
         )
     except Exception as exc:
         logger.exception("inventory update failed item_id=%s device_id=%s", item_id, device_id)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="항목 수정에 실패했습니다.") from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Failed to update inventory item.") from exc
 
     if not updated.data:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 수정에 실패했습니다.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update inventory item.")
 
     result = InventoryItem(**updated.data[0])
     old_qty = float(existing.data.get("quantity", 0))
@@ -201,13 +201,13 @@ async def delete_inventory_item(
     )
     existing_rows = existing_result.data or []
     if not existing_rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="인벤토리 항목을 찾을 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
 
     try:
         db.table("inventory").delete().eq("id", item_id).eq("device_id", device_id).execute()
     except Exception as exc:
         logger.exception("inventory delete failed item_id=%s device_id=%s", item_id, device_id)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="항목 삭제에 실패했습니다.") from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Failed to delete inventory item.") from exc
 
     deleted_item = InventoryItem(**existing_rows[0])
 
@@ -241,7 +241,7 @@ async def restore_inventory_item(
 ):
     name = request.name.strip()
     if not name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이름은 비워둘 수 없습니다.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
 
     existing = (
         db.table("inventory")
@@ -271,7 +271,7 @@ async def restore_inventory_item(
             .execute()
         )
         if not updated.data:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 복구에 실패했습니다.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to restore inventory item.")
         restored = InventoryItem(**updated.data[0])
     else:
         inserted = (
@@ -289,7 +289,7 @@ async def restore_inventory_item(
             .execute()
         )
         if not inserted.data:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 복구에 실패했습니다.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to restore inventory item.")
         restored = InventoryItem(**inserted.data[0])
 
     log_inventory_change(

@@ -114,7 +114,7 @@ async def export_backup(
         logger.exception("backup export failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="백업 내보내기에 실패했습니다.",
+            detail="Failed to export backup.",
         ) from exc
 
 
@@ -134,7 +134,7 @@ async def restore_backup(
 ):
     mode = (request.mode or "merge").strip().lower()
     if mode not in {"merge", "replace"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode는 merge 또는 replace만 허용됩니다.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be either merge or replace.")
 
     restored_counts: dict[str, int] = {table: 0 for table in BACKUP_TABLES}
 
@@ -211,5 +211,5 @@ async def restore_backup(
         logger.exception("backup restore failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="백업 복원에 실패했습니다.",
+            detail="Failed to restore backup.",
         ) from exc

@@ -226,3 +226,23 @@
   - First run failed due Python launcher invocation (`python -m pytest -v` not executable in this shell context).
   - Reran with fallback command `py -m pytest -v`.
   - `32 passed`, exit code `0`.
+
+## B-13 ??refactor(api): CR-006 standardize error messages to English
+- Code changes:
+  - Standardized backend `HTTPException.detail` messages to English in API modules:
+    - `prometheus-api/app/api/inventory.py`
+    - `prometheus-api/app/api/auth.py`
+    - `prometheus-api/app/api/recipes.py`
+    - `prometheus-api/app/api/scans.py`
+    - `prometheus-api/app/api/shopping.py`
+  - Updated front-end server-error localization mapping to support new English backend details:
+    - `prometheus-app/services/http-client.ts` (`localizeServerError` direct mappings expanded)
+  - Fixed corrupted string literals in `prometheus-api/app/api/shopping.py` while standardizing messages (compile-safe string normalization).
+  - Updated scan size-limit test assertion for English detail message:
+    - `prometheus-api/tests/test_scans.py`
+- Test command:
+  - `cd prometheus-api && python -m pytest -v` (environment fallback: `py -m pytest -v`)
+- Test result:
+  - First fallback run failed: `tests/test_scans.py::test_upload_size_limit_exceeded_returns_413` expected old Korean message.
+  - Minimal fix applied: updated assertion to English detail.
+  - Rerun passed: `32 passed`, exit code `0`.

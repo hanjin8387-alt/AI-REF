@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
@@ -31,9 +31,7 @@ from ..services.notifications import create_notification
 
 logger = logging.getLogger(__name__)
 
-SHOPPING_TABLE_MISSING_DETAIL = (
-    "장보기 기능이 아직 초기화되지 않았습니다. 최신 schema.sql을 먼저 적용해 주세요."
-)
+SHOPPING_TABLE_MISSING_DETAIL = ("Shopping feature is not initialized. Please apply the latest schema.sql first.")
 
 router = APIRouter(
     prefix="/shopping",
@@ -63,9 +61,9 @@ def _normalize_name(value: str) -> str:
 def _normalize_unit(value: str | None) -> str:
     unit = (value or "").strip()
     if not unit:
-        return "개"
+        return "\uAC1C"
     if unit.lower() == "unit":
-        return "개"
+        return "\uAC1C"
     return unit
 
 
@@ -313,7 +311,7 @@ async def get_shopping_items(
         logger.exception("shopping list load failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="장보기 목록을 불러오지 못했습니다.",
+            detail="Failed to load shopping list.",
         ) from exc
 
 
@@ -366,7 +364,7 @@ async def get_low_stock_suggestions(
         logger.exception("low stock suggestion failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="저재고 추천을 계산하지 못했습니다.",
+            detail="Failed to calculate low-stock suggestions.",
         ) from exc
 
 
@@ -410,8 +408,8 @@ async def add_low_stock_suggestions(
                 db=db,
                 device_id=device_id,
                 notification_type=NotificationType.SYSTEM,
-                title="저재고 추천 장보기를 추가했어요",
-                message=f"{added_count}개 추가, {updated_count}개 업데이트했어요.",
+                title="Added low-stock suggestions",
+                message=f"Added {added_count} item(s), updated {updated_count} item(s).",
                 metadata={"added_count": added_count, "updated_count": updated_count},
             )
 
@@ -428,7 +426,7 @@ async def add_low_stock_suggestions(
         logger.exception("add low stock suggestions failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="저재고 추천 항목 추가에 실패했습니다.",
+            detail="Failed to add low-stock suggestions.",
         ) from exc
 
 
@@ -442,14 +440,14 @@ async def add_shopping_items(
         if not request.items:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="최소 1개 이상의 항목이 필요합니다.",
+                detail="At least one item is required.",
             )
 
         aggregated = _aggregate_items(request.items)
         if not aggregated:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="유효한 항목 정보가 없습니다.",
+                detail="No valid item payload provided.",
             )
 
         added_count, updated_count, touched_rows = _upsert_pending_shopping_items(
@@ -465,8 +463,8 @@ async def add_shopping_items(
             db=db,
             device_id=device_id,
             notification_type=NotificationType.SYSTEM,
-            title="장보기 목록을 업데이트했어요",
-            message=f"{added_count}개 추가, {updated_count}개 업데이트했어요.",
+            title="Shopping list updated",
+            message=f"Added {added_count} item(s), updated {updated_count} item(s).",
             metadata={"added_count": added_count, "updated_count": updated_count},
         )
 
@@ -483,7 +481,7 @@ async def add_shopping_items(
         logger.exception("shopping add failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="장보기 항목 추가에 실패했습니다.",
+            detail="Failed to add shopping items.",
         ) from exc
 
 
@@ -497,14 +495,14 @@ async def add_shopping_from_recipe(
         if not request.ingredients:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="최소 1개 이상의 재료가 필요합니다.",
+                detail="At least one ingredient is required.",
             )
 
         aggregated = _aggregate_items(request.ingredients)
         if not aggregated:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="유효한 재료 정보가 없습니다.",
+                detail="No valid ingredient payload provided.",
             )
 
         added_count, updated_count, touched_rows = _upsert_pending_shopping_items(
@@ -520,8 +518,8 @@ async def add_shopping_from_recipe(
             db=db,
             device_id=device_id,
             notification_type=NotificationType.SYSTEM,
-            title="레시피 재료를 장보기 목록에 추가했어요",
-            message=f"{request.recipe_title}: 총 {added_count + updated_count}개를 반영했어요.",
+            title="Added recipe ingredients to shopping list",
+            message=f"{request.recipe_title}: applied {added_count + updated_count} item(s).",
             metadata={"recipe_id": request.recipe_id, "count": added_count + updated_count},
         )
 
@@ -538,7 +536,7 @@ async def add_shopping_from_recipe(
         logger.exception("shopping add from recipe failed device_id=%s recipe_id=%s", device_id, request.recipe_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="레시피 재료를 장보기 목록에 추가하지 못했습니다.",
+            detail="Failed to add recipe ingredients to shopping list.",
         ) from exc
 
 
@@ -599,8 +597,8 @@ async def checkout_shopping_items(
                 db=db,
                 device_id=device_id,
                 notification_type=NotificationType.INVENTORY,
-                title="장보기 처리를 완료했어요",
-                message=f"인벤토리에 {added_count}개 추가, {updated_count}개 업데이트했어요.",
+                title="Shopping checkout completed",
+                message=f"Inventory updated: added {added_count}, updated {updated_count}.",
                 metadata={
                     "checked_out_count": len(checked_out_ids),
                     "added_count": added_count,
@@ -612,8 +610,8 @@ async def checkout_shopping_items(
                 db=db,
                 device_id=device_id,
                 notification_type=NotificationType.SYSTEM,
-                title="구매 완료로 변경했어요",
-                message=f"{len(checked_out_ids)}개 항목을 구매 완료로 표시했어요.",
+                title="Marked shopping items as purchased",
+                message=f"Marked {len(checked_out_ids)} item(s) as purchased.",
                 metadata={"checked_out_count": len(checked_out_ids)},
             )
 
@@ -631,7 +629,7 @@ async def checkout_shopping_items(
         logger.exception("shopping checkout failed device_id=%s", device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="장보기 항목 처리에 실패했습니다.",
+            detail="Failed to process shopping checkout.",
         ) from exc
 
 
@@ -654,17 +652,17 @@ async def update_shopping_item(
             or []
         )
         if not found_rows:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="장보기 항목을 찾을 수 없습니다.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping item not found.")
 
         updates: dict[str, object] = {}
         if request.name is not None:
             name = request.name.strip()
             if not name:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이름은 비워둘 수 없습니다.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
             updates["name"] = name
         if request.quantity is not None:
             if request.quantity < 0:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수량은 0 이상이어야 합니다.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than or equal to 0.")
             updates["quantity"] = round(float(request.quantity), 2)
         if request.unit is not None:
             updates["unit"] = _normalize_unit(request.unit)
@@ -677,7 +675,7 @@ async def update_shopping_item(
                 updates["added_to_inventory"] = False
 
         if not updates:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수정할 필드가 없습니다.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update.")
 
         updated = (
             db.table("shopping_items")
@@ -687,7 +685,7 @@ async def update_shopping_item(
             .execute()
         )
         if not updated.data:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="장보기 항목 수정에 실패했습니다.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update shopping item.")
         return ShoppingItem(**updated.data[0])
     except HTTPException:
         raise
@@ -696,7 +694,7 @@ async def update_shopping_item(
         logger.exception("shopping update failed item_id=%s device_id=%s", item_id, device_id)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="장보기 항목 수정에 실패했습니다.",
+            detail="Failed to update shopping item.",
         ) from exc
 
 
@@ -718,11 +716,11 @@ async def delete_shopping_item(
             or []
         )
         if not found_rows:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="장보기 항목을 찾을 수 없습니다.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping item not found.")
 
         db.table("shopping_items").delete().eq("id", item_id).eq("device_id", device_id).execute()
         deleted_item = ShoppingItem(**found_rows[0])
-        return ShoppingDeleteResponse(success=True, message="장보기 항목을 삭제했어요.", deleted_item=deleted_item)
+        return ShoppingDeleteResponse(success=True, message="Deleted shopping item.", deleted_item=deleted_item)
     except HTTPException:
         raise
     except Exception as exc:
@@ -730,5 +728,6 @@ async def delete_shopping_item(
         logger.exception("shopping delete failed item_id=%s device_id=%s", item_id, device_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="장보기 항목 삭제에 실패했습니다.",
+            detail="Failed to delete shopping item.",
         ) from exc
+
