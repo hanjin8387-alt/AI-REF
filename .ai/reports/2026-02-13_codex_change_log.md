@@ -139,7 +139,7 @@
   - Benchmark: `N/A (manual profiler required in UI runtime)`
 
 ## Commit B-3: perf(api): BL-004 parallelize checkout notifications
-- Commit: pending
+- Commit: `82d5118`
 - Files:
   - `prometheus-api/app/api/shopping.py`
 - Commands:
@@ -148,3 +148,15 @@
 - Result:
   - Tests: `PASS` (`40 passed`)
   - Benchmark: `PASS` (`p95=9.3249s`, avg `0.7647s`, status `401x50`)
+
+## Commit B-4: perf(api): BL-006 replace SELECT * with explicit columns
+- Commit: `pending`
+- Files:
+  - `prometheus-api/schema.sql`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark (planned): `hey -n 50 -c 5 $API/inventory`
+  - Benchmark (fallback): `curl -s -o NUL -w "status=%{http_code} total=%{time_total}s size=%{size_download}\n" "$API/inventory"`
+- Result:
+  - Tests: `PASS` (`40 passed`)
+  - Benchmark: `PASS` (`hey` unavailable in shell, fallback `status=401 total=0.087591s size=30`)
