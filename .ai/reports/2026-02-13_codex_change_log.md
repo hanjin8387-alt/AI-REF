@@ -150,7 +150,7 @@
   - Benchmark: `PASS` (`p95=9.3249s`, avg `0.7647s`, status `401x50`)
 
 ## Commit B-4: perf(api): BL-006 replace SELECT * with explicit columns
-- Commit: `pending`
+- Commit: `a978d85`
 - Files:
   - `prometheus-api/schema.sql`
 - Commands:
@@ -160,3 +160,15 @@
 - Result:
   - Tests: `PASS` (`40 passed`)
   - Benchmark: `PASS` (`hey` unavailable in shell, fallback `status=401 total=0.087591s size=30`)
+
+## Commit B-5: perf(network): NC-002 add request deduplication
+- Commit: `pending`
+- Files:
+  - `prometheus-app/services/http-client.ts`
+  - `prometheus-app/__tests__/http-client.test.ts`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this client-only task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 20 tests`)
+  - Benchmark: `N/A`
