@@ -122,6 +122,14 @@ export default function ShoppingScreen() {
       setLoading(true);
       fireAndForget(loadShopping(true), message => setError(message), '장보기 목록 로드 실패');
       fireAndForget(loadLowStockSuggestions(), () => { }, '저재고 추천 로드 실패');
+      fireAndForget(
+        Promise.all([
+          api.getInventory(undefined, 'expiry_date', 30, 0),
+          api.getRecommendations(7, false),
+        ]),
+        () => { },
+        '인접 탭 프리페치 실패'
+      );
     }, [statusFilter])
   );
 

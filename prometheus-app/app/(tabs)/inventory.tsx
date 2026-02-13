@@ -146,6 +146,14 @@ export default function InventoryScreen() {
     useCallback(() => {
       setLoading(true);
       fireAndForget(fetchInventory(true), message => setLoadError(message), '재고 로드 실패');
+      fireAndForget(
+        Promise.all([
+          api.getShoppingItems('pending', 30, 0),
+          api.getRecommendations(7, false),
+        ]),
+        () => { },
+        '인접 탭 프리페치 실패'
+      );
     }, [sortBy])
   );
 

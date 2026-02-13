@@ -117,10 +117,22 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [loadFeed, loadHomeSummary, loading]);
 
+  const prefetchAdjacentTabs = useCallback(() => {
+    fireAndForget(
+      Promise.all([
+        api.getInventory(undefined, 'expiry_date', 30, 0),
+        api.getShoppingItems('pending', 30, 0),
+      ]),
+      () => { },
+      '인접 탭 프리페치 실패'
+    );
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       fireAndForget(refreshAll(false), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패');
-    }, [refreshAll])
+      prefetchAdjacentTabs();
+    }, [prefetchAdjacentTabs, refreshAll])
   );
 
   const openRecipeDetail = useCallback((recipe: ApiRecipe) => {

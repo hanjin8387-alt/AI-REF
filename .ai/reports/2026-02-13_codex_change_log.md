@@ -174,7 +174,7 @@
   - Benchmark: `N/A`
 
 ## Commit B-6: perf(api): NC-003 add Cache-Control headers
-- Commit: `pending`
+- Commit: `6f6b91c`
 - Files:
   - `prometheus-api/app/main.py`
   - `prometheus-api/tests/test_main.py`
@@ -184,3 +184,19 @@
 - Result:
   - Tests: `PASS` (`41 passed`)
   - Perf smoke: `PASS` (`cache_control=private, max-age=15, stale-while-revalidate=30`, `status=200`)
+
+## Commit B-7: perf(ux): NC-004 prefetch adjacent tab data
+- Commit: `pending`
+- Files:
+  - `prometheus-app/services/api.ts`
+  - `prometheus-app/app/(tabs)/index.tsx`
+  - `prometheus-app/app/(tabs)/inventory.tsx`
+  - `prometheus-app/app/(tabs)/shopping.tsx`
+  - `prometheus-app/__tests__/inventory-screen.test.tsx`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this UI prefetch task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 20 tests`)
+  - Benchmark: `N/A`
+  - Notes: First run failed due missing test mock methods; added minimal mock stubs and reran successfully.
