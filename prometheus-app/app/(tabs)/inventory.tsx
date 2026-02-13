@@ -79,6 +79,8 @@ export default function InventoryScreen() {
   const [sortBy, setSortBy] = useState<SortOption>('expiry_date');
   const [activeFilter, setActiveFilter] = useState<InventoryFilter>('all');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
 
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [editName, setEditName] = useState('');
@@ -118,6 +120,8 @@ export default function InventoryScreen() {
     }
 
     if (result.data) {
+      setOfflineMode(Boolean(result.data.offline));
+      setCacheTimestamp(result.data.cache_timestamp ?? null);
       setItems(prev => {
         const merged = reset ? result.data!.items : [...prev, ...result.data!.items];
         return dedupeById(merged);
@@ -125,6 +129,8 @@ export default function InventoryScreen() {
       setHasMore(result.data.has_more);
       setLoadError(null);
     } else if (reset) {
+      setOfflineMode(false);
+      setCacheTimestamp(null);
       setItems([]);
       setLoadError(result.error || '재고를 불러오지 못했어요.');
     }
@@ -329,6 +335,15 @@ export default function InventoryScreen() {
         <Text style={styles.subtitle}>{stats.total}개</Text>
       </View>
 
+      {offlineMode ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            오프라인 캐시 표시 중
+            {cacheTimestamp ? ` / 기준: ${new Date(cacheTimestamp).toLocaleString()}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.statsContainer}>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{stats.total}</Text>
@@ -521,6 +536,21 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: Colors.gray600, marginTop: 4 },
 
   statsContainer: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginBottom: 12 },
+  offlineBanner: {
+    marginHorizontal: 24,
+    marginBottom: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFF4D9',
+    borderWidth: 1,
+    borderColor: '#F3D38C',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  offlineBannerText: {
+    color: '#8A5B00',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   statCard: {
     flex: 1,
     backgroundColor: Colors.white,

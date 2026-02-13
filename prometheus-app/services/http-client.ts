@@ -1,6 +1,7 @@
 ﻿import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { offlineCache } from './offline-cache';
 
 const APP_TOKEN =
   process.env.EXPO_PUBLIC_APP_TOKEN ||
@@ -13,6 +14,7 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   offline?: boolean;
+  cache_timestamp?: number | null;
 }
 
 type RequestOptions = RequestInit & {
@@ -21,6 +23,7 @@ type RequestOptions = RequestInit & {
   timeoutMs?: number;
   disableOfflineFallback?: boolean;
   skipOfflineQueue?: boolean;
+  idempotencyKey?: string;
 };
 
 type CacheEntry = {
@@ -34,6 +37,9 @@ export type PendingSyncAction = {
   method: string;
   body?: string;
   created_at: number;
+  attempt_count: number;
+  next_retry_at: number;
+  idempotency_key: string;
 };
 
 export class HttpClient {
@@ -101,21 +107,46 @@ export class HttpClient {
     }
   }
 
-  async getOfflineSyncStatus(): Promise<{ online: boolean; pending_count: number; last_sync_at: number | null }> {
+  async getOfflineSyncStatus(): Promise<{
+    online: boolean;
+    pending_count: number;
+    last_sync_at: number | null;
+    queue_health: 'healthy' | 'warning' | 'critical';
+    oldest_pending_age_ms: number;
+    stale_cache_age_ms: number;
+  }> {
     const online = typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean' ? navigator.onLine : true;
     try {
-      const { offlineCache } = await import('./offline-cache');
-      const [queue, lastSync] = await Promise.all([offlineCache.getPendingMutations(), offlineCache.getLastSync()]);
+      const [queue, lastSync, latestCacheTimestamp] = await Promise.all([
+        offlineCache.getPendingMutations(),
+        offlineCache.getLastSync(),
+        offlineCache.getLatestCacheTimestamp(),
+      ]);
+      const now = Date.now();
+      const oldestPending = queue.reduce<number | null>((min, item) => {
+        if (!Number.isFinite(item.created_at)) return min;
+        if (min === null) return item.created_at;
+        return Math.min(min, item.created_at);
+      }, null);
+      const oldestPendingAge = oldestPending ? Math.max(0, now - oldestPending) : 0;
+      const staleCacheAge = latestCacheTimestamp ? Math.max(0, now - latestCacheTimestamp) : 0;
+      const queueHealth = this.computeQueueHealth(queue.length, oldestPendingAge);
       return {
         online,
         pending_count: queue.length,
         last_sync_at: lastSync,
+        queue_health: queueHealth,
+        oldest_pending_age_ms: oldestPendingAge,
+        stale_cache_age_ms: staleCacheAge,
       };
     } catch {
       return {
         online,
         pending_count: 0,
         last_sync_at: null,
+        queue_health: 'healthy',
+        oldest_pending_age_ms: 0,
+        stale_cache_age_ms: 0,
       };
     }
   }
@@ -127,16 +158,16 @@ export class HttpClient {
     let failedCount = 0;
 
     try {
-      const { offlineCache } = await import('./offline-cache');
       const queue = await offlineCache.getPendingMutations();
-      const targets = queue.slice(0, limit);
+      const now = Date.now();
+      const targets = queue.filter(action => action.next_retry_at <= now).slice(0, limit);
 
       for (const action of targets) {
         try {
           const response = await fetch(`${this.baseUrl}${action.endpoint}`, {
             method: action.method,
             headers: {
-              ...this.buildHeaders({ body: action.body }),
+              ...this.buildHeaders({ body: action.body, method: action.method }, action.idempotency_key),
               'Content-Type': 'application/json',
             },
             body: action.body,
@@ -149,8 +180,18 @@ export class HttpClient {
           }
 
           failedCount += 1;
+          const nextAttempt = action.attempt_count + 1;
+          await offlineCache.updatePendingMutation(action.id, {
+            attempt_count: nextAttempt,
+            next_retry_at: now + this.computeBackoffMs(nextAttempt),
+          });
         } catch {
           failedCount += 1;
+          const nextAttempt = action.attempt_count + 1;
+          await offlineCache.updatePendingMutation(action.id, {
+            attempt_count: nextAttempt,
+            next_retry_at: now + this.computeBackoffMs(nextAttempt),
+          });
         }
       }
 
@@ -179,6 +220,7 @@ export class HttpClient {
     }
 
     const method = (options.method || 'GET').toUpperCase();
+    const idempotencyKey = this.resolveIdempotencyKey(endpoint, method, options);
     const cacheTtlMs = options.cacheTtlMs || 0;
     const cacheKey = this.buildCacheKey(endpoint, method);
 
@@ -196,7 +238,7 @@ export class HttpClient {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
-        headers: this.buildHeaders(options),
+        headers: this.buildHeaders(options, idempotencyKey),
         signal: controller.signal,
       });
 
@@ -231,23 +273,47 @@ export class HttpClient {
 
       // Queue mutation requests so user can retry from Sync Center.
       if (method !== 'GET' && !options.skipOfflineQueue && !(options.body instanceof FormData)) {
-        this.enqueueMutation(endpoint, method, typeof options.body === 'string' ? options.body : undefined);
+        await this.enqueueMutation(endpoint, method, typeof options.body === 'string' ? options.body : undefined, idempotencyKey);
       }
 
       // Offline fallback for GET
       if (method === 'GET' && !options.disableOfflineFallback) {
         try {
-          const { offlineCache } = await import('./offline-cache');
           let offlineData: unknown = null;
+          let cacheTimestamp: number | null = null;
           if (endpoint.startsWith('/inventory')) {
-            offlineData = await offlineCache.getInventory();
+            const inventoryEnvelope = await offlineCache.getInventoryEnvelope();
+            if (inventoryEnvelope) {
+              cacheTimestamp = inventoryEnvelope.cache_timestamp;
+              offlineData = {
+                items: inventoryEnvelope.items,
+                total_count: inventoryEnvelope.items.length,
+                limit: inventoryEnvelope.items.length || 30,
+                offset: 0,
+                has_more: false,
+                offline: true,
+                cache_timestamp: cacheTimestamp,
+              };
+            }
           } else if (endpoint.startsWith('/recipes/favorites')) {
-            offlineData = await offlineCache.getFavorites();
+            const favoritesEnvelope = await offlineCache.getFavoritesEnvelope();
+            if (favoritesEnvelope) {
+              cacheTimestamp = favoritesEnvelope.cache_timestamp;
+              offlineData = favoritesEnvelope.recipes;
+            }
           } else if (endpoint.startsWith('/shopping')) {
-            offlineData = this.normalizeShoppingFallback(await offlineCache.getShopping());
+            const shoppingEnvelope = await offlineCache.getShoppingEnvelope();
+            if (shoppingEnvelope) {
+              cacheTimestamp = shoppingEnvelope.cache_timestamp;
+              offlineData = this.normalizeShoppingFallback(shoppingEnvelope.payload);
+            }
           }
           if (offlineData !== null && offlineData !== undefined) {
-            return { data: offlineData as T, offline: true } as ApiResponse<T>;
+            return {
+              data: offlineData as T,
+              offline: true,
+              cache_timestamp: cacheTimestamp,
+            } as ApiResponse<T>;
           }
         } catch {
           // ignore
@@ -271,10 +337,14 @@ export class HttpClient {
     }
   }
 
-  private async enqueueMutation(endpoint: string, method: string, body?: string) {
+  private async enqueueMutation(endpoint: string, method: string, body?: string, idempotencyKey?: string) {
     try {
-      const { offlineCache } = await import('./offline-cache');
-      await offlineCache.enqueueMutation({ endpoint, method, body });
+      await offlineCache.enqueueMutation({
+        endpoint,
+        method,
+        body,
+        idempotency_key: idempotencyKey || this.generateIdempotencyKey(endpoint, method, body),
+      });
     } catch {
       // ignore
     }
@@ -282,7 +352,6 @@ export class HttpClient {
 
   private async recordSyncSuccess() {
     try {
-      const { offlineCache } = await import('./offline-cache');
       await offlineCache.setLastSync();
     } catch {
       // ignore
@@ -330,10 +399,11 @@ export class HttpClient {
     }
   }
 
-  private buildHeaders(options: RequestInit): Record<string, string> {
+  private buildHeaders(options: RequestInit, idempotencyKey?: string): Record<string, string> {
     const headers: Record<string, string> = {
       ...(APP_TOKEN && { 'X-App-Token': APP_TOKEN }),
       ...(this.deviceId && { 'X-Device-ID': this.deviceId }),
+      ...(idempotencyKey && { 'X-Idempotency-Key': idempotencyKey }),
     };
 
     if (!(options.body instanceof FormData)) {
@@ -342,6 +412,53 @@ export class HttpClient {
 
     const customHeaders = options.headers as Record<string, string> | undefined;
     return { ...headers, ...customHeaders };
+  }
+
+  private resolveIdempotencyKey(endpoint: string, method: string, options: RequestOptions): string | undefined {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return undefined;
+    if (options.body instanceof FormData) return undefined;
+    if (options.idempotencyKey) return options.idempotencyKey;
+    return this.generateIdempotencyKey(endpoint, method, typeof options.body === 'string' ? options.body : undefined);
+  }
+
+  private generateIdempotencyKey(endpoint: string, method: string, body?: string): string {
+    const payload = `${method}:${endpoint}:${body || ''}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    const globalBuffer = (globalThis as { Buffer?: { from: (input: string, encoding?: string) => { toString: (encoding: string) => string } } }).Buffer;
+    try {
+      if (globalBuffer) {
+        return globalBuffer
+          .from(payload, 'utf8')
+          .toString('base64')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/g, '')
+          .slice(0, 64);
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      if (typeof btoa === 'function') {
+        return btoa(unescape(encodeURIComponent(payload))).replace(/=+$/g, '').slice(0, 64);
+      }
+    } catch {
+      // ignore
+    }
+
+    return `ikey-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+
+  private computeBackoffMs(attempt: number): number {
+    const boundedAttempt = Math.max(1, attempt);
+    return Math.min(300000, 5000 * 2 ** (boundedAttempt - 1));
+  }
+
+  private computeQueueHealth(count: number, oldestAgeMs: number): 'healthy' | 'warning' | 'critical' {
+    if (count === 0) return 'healthy';
+    if (count >= 100 || oldestAgeMs > 60 * 60 * 1000) return 'critical';
+    if (count >= 20 || oldestAgeMs > 10 * 60 * 1000) return 'warning';
+    return 'healthy';
   }
 
   private buildCacheKey(endpoint: string, method: string) {
@@ -426,3 +543,6 @@ export class HttpClient {
     return normalized;
   }
 }
+
+
+

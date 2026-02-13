@@ -44,6 +44,8 @@ export default function HomeScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expiringItems, setExpiringItems] = useState<InventoryItem[]>([]);
+  const [inventoryOffline, setInventoryOffline] = useState(false);
+  const [inventoryCacheTimestamp, setInventoryCacheTimestamp] = useState<number | null>(null);
 
   const [isCooking, setIsCooking] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -86,9 +88,14 @@ export default function HomeScreen() {
     }
 
     if (!inventoryResult.data) {
+      setInventoryOffline(false);
+      setInventoryCacheTimestamp(null);
       setExpiringItems([]);
       return;
     }
+
+    setInventoryOffline(Boolean(inventoryResult.data.offline));
+    setInventoryCacheTimestamp(inventoryResult.data.cache_timestamp ?? null);
 
     const soonest = inventoryResult.data.items
       .map(item => ({ item, days: getDaysUntil(item.expiry_date) }))
@@ -280,6 +287,15 @@ export default function HomeScreen() {
               <Text style={styles.expiringActionText}>인벤토리에서 확인</Text>
             </TouchableOpacity>
           </LinearGradient>
+        </View>
+      ) : null}
+
+      {inventoryOffline ? (
+        <View style={styles.offlineBadge}>
+          <Text style={styles.offlineBadgeText}>
+            오프라인 캐시로 임박 재료를 표시 중
+            {inventoryCacheTimestamp ? ` / 기준: ${new Date(inventoryCacheTimestamp).toLocaleString()}` : ''}
+          </Text>
         </View>
       ) : null}
 
@@ -492,6 +508,21 @@ const styles = StyleSheet.create({
   expiringItemText: { color: '#6C4A00', fontSize: 12, marginBottom: 2 },
   expiringAction: { marginTop: 8, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   expiringActionText: { color: '#22352B', fontWeight: '700', fontSize: 12 },
+  offlineBadge: {
+    marginHorizontal: 24,
+    marginBottom: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F3D38C',
+    backgroundColor: '#FFF4D9',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  offlineBadgeText: {
+    color: '#8A5B00',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   feedToggle: { flexDirection: 'row', paddingHorizontal: 24, gap: 8, marginBottom: 12 },
   feedButton: {
     flex: 1,
