@@ -10,6 +10,11 @@ class _DummyModel:
         return {"contents": contents, "generation_config": generation_config}
 
 
+class _DummyResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
 @pytest.mark.asyncio
 async def test_generate_with_model_fallback_uses_explicit_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
@@ -53,3 +58,36 @@ async def test_generate_with_model_fallback_raises_timeout(monkeypatch: pytest.M
             contents=[{"key": "value"}],
             generation_config=object(),
         )
+
+
+@pytest.mark.asyncio
+async def test_analyze_food_image_parses_valid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = gemini_service.GeminiService.__new__(gemini_service.GeminiService)
+    service.language = "ko"
+
+    async def fake_generate_with_model_fallback(*, contents, generation_config):
+        return _DummyResponse(
+            '[{"name":"우유","quantity":1,"unit":"L","category":"냉장","confidence":0.95}]'
+        )
+
+    monkeypatch.setattr(service, "_generate_with_model_fallback", fake_generate_with_model_fallback)
+
+    items = await service.analyze_food_image(b"image-bytes", "image/jpeg")
+
+    assert len(items) == 1
+    assert items[0].name == "우유"
+    assert items[0].category == "냉장"
+
+
+@pytest.mark.asyncio
+async def test_analyze_food_image_returns_empty_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = gemini_service.GeminiService.__new__(gemini_service.GeminiService)
+    service.language = "ko"
+
+    async def fake_generate_with_model_fallback(*, contents, generation_config):
+        return _DummyResponse("not-json")
+
+    monkeypatch.setattr(service, "_generate_with_model_fallback", fake_generate_with_model_fallback)
+
+    items = await service.analyze_food_image(b"image-bytes", "image/jpeg")
+    assert items == []

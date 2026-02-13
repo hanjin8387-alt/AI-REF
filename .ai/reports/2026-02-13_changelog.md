@@ -144,3 +144,14 @@
   - `cd prometheus-app && npm test -- --passWithNoTests` (execution used `npm.cmd` due PowerShell execution policy)
 - Test result:
   - `No tests found, exiting with code 0`.
+
+## B-7 — test(api): TE-002 add gemini service unit tests with mocked API
+- Code changes:
+  - Expanded `prometheus-api/tests/test_services/test_gemini_service.py`:
+    - Added mocked response parsing test for valid JSON.
+    - Added invalid JSON fallback test (`[]` result).
+    - Kept timeout-related behavior tests.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_gemini_service.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `4 passed`, exit code `0`.
