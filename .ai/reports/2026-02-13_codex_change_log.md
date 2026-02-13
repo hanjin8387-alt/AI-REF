@@ -213,9 +213,20 @@
   - Benchmark: `N/A`
 
 ## Commit B-9: perf(ux): PS-003 add recipe generation progress steps
-- Commit: `pending`
+- Commit: `a2206b3`
 - Files:
   - `prometheus-app/app/(tabs)/index.tsx`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this UX task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 20 tests`)
+  - Benchmark: `N/A`
+
+## Commit B-10: perf(ux): PS-004 add upload progress indicator
+- Commit: `pending`
+- Files:
+  - `prometheus-app/app/(tabs)/scan.tsx`
 - Commands:
   - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
   - Benchmark: `N/A (master plan does not define a CLI benchmark for this UX task)`

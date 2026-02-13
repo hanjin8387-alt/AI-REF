@@ -63,6 +63,8 @@ export default function ScanScreen() {
   const [sourceType, setSourceType] = useState<ScanSourceType>('camera');
   const [savingInventory, setSavingInventory] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
+  const [analyzeProgressLabel, setAnalyzeProgressLabel] = useState('');
   const [bulkCategory, setBulkCategory] = useState<StorageCategory>('상온');
   const [bulkUnit, setBulkUnit] = useState('개');
   const [bulkMultiplier, setBulkMultiplier] = useState('1');
@@ -123,7 +125,11 @@ export default function ScanScreen() {
     setScanState('preview');
   };
 
-  const pollScanResult = async (scanId: string, maxAttempts = 45) => {
+  const pollScanResult = async (
+    scanId: string,
+    maxAttempts = 45,
+    onProgress?: (attempt: number, total: number, status?: string) => void
+  ) => {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const resultResponse = await api.getScanResult(scanId);
       if (resultResponse.error) {
@@ -135,6 +141,7 @@ export default function ScanScreen() {
         return resultResponse;
       }
 
+      onProgress?.(attempt + 1, maxAttempts, status);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
@@ -146,20 +153,38 @@ export default function ScanScreen() {
 
     setScanState('analyzing');
     setAnalyzeError(null);
+    setAnalyzeProgress(0.08);
+    setAnalyzeProgressLabel('이미지를 준비하고 있어요...');
 
     try {
+      setAnalyzeProgress(0.32);
+      setAnalyzeProgressLabel('이미지를 업로드하고 있어요...');
       const uploadResult = await api.uploadScan(capturedImage, sourceType);
       if (uploadResult.error || !uploadResult.data) {
         const message = uploadResult.error || '업로드에 실패했어요.';
+        setAnalyzeProgress(0);
+        setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
         Alert.alert('스캔 실패', message);
         return;
       }
 
-      const resultResponse = await pollScanResult(uploadResult.data.scan_id);
+      setAnalyzeProgress(0.55);
+      setAnalyzeProgressLabel('AI가 이미지를 분석하고 있어요...');
+      const resultResponse = await pollScanResult(uploadResult.data.scan_id, 45, (attempt, total, status) => {
+        const normalized = Math.min(0.95, 0.55 + (attempt / total) * 0.4);
+        setAnalyzeProgress(normalized);
+        if (status === 'processing') {
+          setAnalyzeProgressLabel('재료를 인식하고 있어요...');
+        } else {
+          setAnalyzeProgressLabel('결과를 정리하고 있어요...');
+        }
+      });
       if (resultResponse.error || !resultResponse.data) {
         const message = resultResponse.error || '분석에 실패했어요.';
+        setAnalyzeProgress(0);
+        setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
         Alert.alert('분석 실패', message);
@@ -168,6 +193,8 @@ export default function ScanScreen() {
 
       if (resultResponse.data.status === 'failed') {
         const message = resultResponse.data.error_message || '이미지 분석에 실패했어요.';
+        setAnalyzeProgress(0);
+        setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
         Alert.alert('분석 실패', message);
@@ -184,8 +211,12 @@ export default function ScanScreen() {
       setBulkUnit('개');
       setBulkCategory('상온');
       setBulkMultiplier('1');
+      setAnalyzeProgress(1);
+      setAnalyzeProgressLabel('분석 완료! 결과를 표시해요...');
       setScanState('result');
     } catch {
+      setAnalyzeProgress(0);
+      setAnalyzeProgressLabel('');
       setAnalyzeError('스캔 중 오류가 발생했어요.');
       setScanState('preview');
       Alert.alert('오류', '스캔 중 예기치 못한 오류가 발생했어요.');
@@ -474,7 +505,11 @@ export default function ScanScreen() {
         {scanState === 'analyzing' ? (
           <View style={styles.analyzingOverlay}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.analyzingText}>AI가 이미지를 분석하고 있어요...</Text>
+            <Text style={styles.analyzingText}>{analyzeProgressLabel || 'AI가 이미지를 분석하고 있어요...'}</Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${Math.round(analyzeProgress * 100)}%` }]} />
+            </View>
+            <Text style={styles.progressPercent}>{Math.round(analyzeProgress * 100)}%</Text>
           </View>
         ) : null}
       </View>
@@ -666,6 +701,9 @@ const styles = StyleSheet.create({
   previewImage: { width: '100%', height: '100%' },
   analyzingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   analyzingText: { color: Colors.white, marginTop: 10, fontWeight: '600' },
+  progressTrack: { marginTop: 12, width: 180, height: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: Colors.primary },
+  progressPercent: { color: Colors.white, marginTop: 6, fontWeight: '700', fontSize: 12 },
   errorBanner: { marginHorizontal: 16, marginTop: 10, borderRadius: 10, backgroundColor: 'rgba(255,71,87,0.12)', borderWidth: 1, borderColor: 'rgba(255,71,87,0.3)', padding: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   errorText: { color: Colors.danger, flex: 1 },
   errorRetryButton: { borderRadius: 8, backgroundColor: Colors.white, paddingHorizontal: 10, paddingVertical: 6 },
