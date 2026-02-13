@@ -247,7 +247,7 @@
   - Benchmark: `N/A`
 
 ## Commit B-12: perf(observability): OM-003 add cache and client perf logging
-- Commit: `pending`
+- Commit: `b1aea03`
 - Files:
   - `prometheus-api/app/services/recipe_cache.py`
   - `prometheus-app/services/perf-logger.ts`
@@ -258,4 +258,16 @@
   - Benchmark: `N/A (master plan does not define a separate CLI benchmark for this observability task)`
 - Result:
   - Tests: `PASS` (`app: 4 suites, 20 tests / api: 42 passed`)
+  - Benchmark: `N/A`
+
+## Commit B-13: perf(network): PRL-002 limit client cache map size
+- Commit: `pending`
+- Files:
+  - `prometheus-app/services/http-client.ts`
+  - `prometheus-app/__tests__/http-client.test.ts`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this client reliability task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 21 tests`)
   - Benchmark: `N/A`

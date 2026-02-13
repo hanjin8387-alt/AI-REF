@@ -10,6 +10,7 @@ const APP_TOKEN =
   '';
 const REQUEST_TIMEOUT_MS = 20000;
 const DEVICE_ID_FILE = 'prometheus-device-id.txt';
+const MAX_CLIENT_CACHE_ENTRIES = 200;
 
 export interface ApiResponse<T> {
   data?: T;
@@ -282,6 +283,7 @@ export class HttpClient {
             expiresAt: Date.now() + cacheTtlMs,
             data,
           });
+          this.pruneClientCache();
         }
 
         this.recordSyncSuccess();
@@ -528,6 +530,14 @@ export class HttpClient {
 
   private buildCacheKey(endpoint: string, method: string) {
     return `${method}:${endpoint}`;
+  }
+
+  private pruneClientCache() {
+    while (this.cache.size > MAX_CLIENT_CACHE_ENTRIES) {
+      const oldestKey = this.cache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.cache.delete(oldestKey);
+    }
   }
 
   private normalizeShoppingFallback(data: unknown): unknown {

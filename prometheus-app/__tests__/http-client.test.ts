@@ -222,6 +222,24 @@ describe('http-client', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('prunes client cache map size to configured maximum', () => {
+    const client = new TestHttpClient('https://example.com');
+    const cache = (client as unknown as { cache: Map<string, unknown> }).cache;
+    const prune = (client as unknown as { pruneClientCache: () => void }).pruneClientCache.bind(client);
+
+    for (let index = 0; index < 210; index += 1) {
+      cache.set(`GET:/cache-${index}`, {
+        expiresAt: Date.now() + 1000,
+        data: { index },
+      });
+    }
+
+    prune();
+
+    expect(cache.size).toBeLessThanOrEqual(200);
+    expect(cache.has('GET:/cache-0')).toBe(false);
+  });
+
   it('computes healthy sync status when queue is empty', async () => {
     const client = new TestHttpClient('https://example.com');
     setNavigator({ onLine: true });
