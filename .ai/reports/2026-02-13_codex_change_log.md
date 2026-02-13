@@ -282,7 +282,7 @@
   - Perf smoke: `PASS` (`/health avg=91.2ms p95=164.8ms`, `/inventory avg=86.3ms p95=95.5ms`)
 
 ## Commit B-15: perf(build): BS-001 remove console in production
-- Commit: `pending`
+- Commit: `c478826`
 - Files:
   - `prometheus-app/babel.config.js`
   - `prometheus-app/package.json`
@@ -294,3 +294,15 @@
   - Tests: `PASS` (`4 suites, 21 tests`)
   - Benchmark: `N/A`
   - Notes: First run failed due Babel cache setup order; fixed with minimal config change and reran successfully.
+
+## Commit P2-1: perf(api): BL-003 paginate admin expiry batch queries
+- Commit: `pending`
+- Files:
+  - `prometheus-api/app/api/admin.py`
+  - `prometheus-api/tests/test_admin.py`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Perf smoke: `C:\Program Files\Git\bin\bash.exe -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`44 passed`)
+  - Perf smoke: `PASS` (`/health avg=81.4ms p95=84.0ms`, `/inventory avg=83.5ms p95=87.7ms`)

@@ -1,7 +1,7 @@
 """Admin endpoints for scheduled tasks (expiry checks, etc.)."""
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from supabase import Client
@@ -13,11 +13,70 @@ from ..services.fcm_service import send_push_to_many
 from ..services.notifications import create_notification
 
 logger = logging.getLogger(__name__)
+EXPIRY_PAGE_SIZE = 500
 
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
 )
+
+
+def _chunked(values: list[str], size: int):
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _fetch_expiring_inventory_rows(
+    db: Client,
+    *,
+    today: date,
+    threshold: date,
+    page_size: int = EXPIRY_PAGE_SIZE,
+) -> list[dict]:
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        page_result = (
+            db.table("inventory")
+            .select("device_id, name, expiry_date, quantity")
+            .lte("expiry_date", threshold.isoformat())
+            .gte("expiry_date", today.isoformat())
+            .gt("quantity", 0)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        page_rows = page_result.data or []
+        rows.extend(page_rows)
+        if len(page_rows) < page_size:
+            break
+        offset += page_size
+    return rows
+
+
+def _fetch_push_tokens(
+    db: Client,
+    *,
+    device_ids: list[str],
+    page_size: int = EXPIRY_PAGE_SIZE,
+) -> dict[str, str]:
+    push_tokens: dict[str, str] = {}
+    if not device_ids:
+        return push_tokens
+
+    for chunk in _chunked(device_ids, page_size):
+        devices_result = (
+            db.table("devices")
+            .select("device_id, push_token")
+            .in_("device_id", chunk)
+            .execute()
+        )
+        for row in devices_result.data or []:
+            device_id = row.get("device_id")
+            token = row.get("push_token")
+            if device_id and token:
+                push_tokens[device_id] = token
+
+    return push_tokens
 
 
 def _require_admin_token(
@@ -46,16 +105,11 @@ async def check_expiring_items(
     today = datetime.now().date()
     threshold = today + timedelta(days=3)
 
-    # Get all inventory items expiring within 3 days
-    expiring_result = (
-        db.table("inventory")
-        .select("device_id, name, expiry_date, quantity")
-        .lte("expiry_date", threshold.isoformat())
-        .gte("expiry_date", today.isoformat())
-        .gt("quantity", 0)
-        .execute()
+    expiring_rows = _fetch_expiring_inventory_rows(
+        db,
+        today=today,
+        threshold=threshold,
     )
-    expiring_rows = expiring_result.data or []
 
     if not expiring_rows:
         return ExpiryCheckResponse(devices_checked=0, notifications_sent=0, errors=0)
@@ -69,17 +123,7 @@ async def check_expiring_items(
 
     # Get push tokens for all affected devices
     device_ids = list(device_items.keys())
-    devices_result = (
-        db.table("devices")
-        .select("device_id, push_token")
-        .in_("device_id", device_ids)
-        .execute()
-    )
-    push_tokens = {
-        row["device_id"]: row.get("push_token")
-        for row in (devices_result.data or [])
-        if row.get("push_token")
-    }
+    push_tokens = _fetch_push_tokens(db, device_ids=device_ids)
 
     notifications_sent = 0
     errors = 0
