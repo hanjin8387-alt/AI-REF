@@ -97,3 +97,16 @@
 ## B-2 — SEC-007 .dockerignore generation
 - Status:
   - Skipped by plan rule because `.dockerignore` was already created and committed in `A-2`.
+
+## B-3 — feat(api): PR-006 add /health endpoint with DB connectivity check
+- Code changes:
+  - Updated `prometheus-api/app/main.py`:
+    - Added `GET /health` endpoint.
+    - Added DB ping via `get_db` dependency (`devices` table lightweight query).
+    - Returns `200` + `{status: ok, database: ok}` on success.
+    - Returns `503` + degraded payload when DB ping fails.
+  - Added `prometheus-api/tests/test_main.py` health endpoint test.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_main.py -v -k "health"` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `1 passed`, exit code `0`.

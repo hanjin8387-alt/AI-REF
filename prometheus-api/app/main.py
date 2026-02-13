@@ -1,0 +1,133 @@
+from contextlib import asynccontextmanager
+import logging
+
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+from supabase import Client
+
+from .api.admin import router as admin_router
+from .api.auth import router as auth_router
+from .api.inventory import router as inventory_router
+from .api.notifications import router as notifications_router
+from .api.recipes import router as recipes_router
+from .api.scans import router as scans_router
+from .api.shopping import router as shopping_router
+from .api.stats import router as stats_router
+from .core.config import get_settings
+from .core.database import get_db
+
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    missing = []
+    if settings.require_app_token and not settings.app_token:
+        missing.append("APP_TOKEN")
+    if not settings.supabase_url:
+        missing.append("SUPABASE_URL")
+    if not settings.supabase_key:
+        missing.append("SUPABASE_KEY")
+    if not settings.gemini_api_key:
+        missing.append("GEMINI_API_KEY")
+    if missing:
+        raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
+    if not settings.parsed_cors_origins:
+        raise RuntimeError("CORS_ORIGINS must include at least one explicit origin")
+
+    # Prevent wildcard CORS in production-like environments.
+    if settings.is_production_like and settings.cors_origins.strip() == "*":
+        raise RuntimeError("CORS_ORIGINS must not be '*' in production-like environments")
+    if settings.is_production_like and not settings.require_app_token and not settings.parsed_allowed_device_ids:
+        raise RuntimeError("ALLOWED_DEVICE_IDS must be set when REQUIRE_APP_TOKEN is false in production-like environments")
+
+    logging.basicConfig(
+        level=logging.DEBUG if settings.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logger.info("startup app=%s env=%s model=%s", settings.app_name, settings.environment, settings.gemini_model)
+    yield
+    logger.info("shutdown app=%s", settings.app_name)
+
+
+app = FastAPI(
+    title="PROMETHEUS API",
+    description="""
+Smart ingredient management API.
+
+Features:
+- Scan ingredients/receipts
+- Manage inventory
+- Recipe recommendations and favorites
+- Cooking history and notifications
+""",
+    version="1.1.0",
+    lifespan=lifespan,
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(SlowAPIMiddleware)
+
+settings = get_settings()
+cors_origins = settings.parsed_cors_origins
+allow_credentials = "*" not in cors_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(scans_router)
+app.include_router(inventory_router)
+app.include_router(recipes_router)
+app.include_router(notifications_router)
+app.include_router(shopping_router)
+app.include_router(stats_router)
+app.include_router(admin_router)
+
+
+@app.get("/")
+@limiter.limit("30/minute")
+async def root(request: Request):
+    return {
+        "name": "PROMETHEUS API",
+        "version": "1.1.0",
+        "status": "running",
+        "docs": "/docs",
+    }
+
+
+@app.get("/health")
+@limiter.limit("30/minute")
+async def health(
+    request: Request,
+    db: Client = Depends(get_db),
+):
+    try:
+        db.table("devices").select("device_id").limit(1).execute()
+    except Exception:
+        logger.exception("health check db ping failed")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "degraded",
+                "database": "error",
+            },
+        )
+
+    return {
+        "status": "ok",
+        "database": "ok",
+    }
