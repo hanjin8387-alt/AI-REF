@@ -40,6 +40,31 @@ async def test_generate_with_model_fallback_uses_explicit_timeout(monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_generate_with_model_fallback_logs_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = gemini_service.GeminiService.__new__(gemini_service.GeminiService)
+    service._active_model_index = 0
+    service._model_candidates = ["model-a"]
+    service.model = _DummyModel()
+
+    info_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fake_logger_info(message: str, *args: object) -> None:
+        info_calls.append((message, args))
+
+    monkeypatch.setattr(gemini_service.logger, "info", fake_logger_info)
+
+    await service._generate_with_model_fallback(
+        contents=[{"key": "value"}],
+        generation_config=object(),
+    )
+
+    assert any(
+        message == "gemini.call model=%s duration_ms=%.2f status=ok" and args[0] == "model-a"
+        for message, args in info_calls
+    )
+
+
+@pytest.mark.asyncio
 async def test_generate_with_model_fallback_raises_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_wait_for(awaitable, timeout):
         if hasattr(awaitable, "close"):

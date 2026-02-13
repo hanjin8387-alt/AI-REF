@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from typing import List, Optional
 
 import google.generativeai as genai
@@ -78,15 +79,32 @@ class GeminiService:
                 self._active_model_index = idx
                 self.model = genai.GenerativeModel(model_name)
 
+            started = time.perf_counter()
             try:
-                return await asyncio.wait_for(
+                response = await asyncio.wait_for(
                     self.model.generate_content_async(
                         contents=contents,
                         generation_config=generation_config,
                     ),
                     timeout=GEMINI_TIMEOUT_SECONDS,
                 )
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                logger.info("gemini.call model=%s duration_ms=%.2f status=ok", model_name, elapsed_ms)
+                return response
             except Exception as exc:
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                if isinstance(exc, asyncio.TimeoutError):
+                    logger.warning(
+                        "gemini.call model=%s duration_ms=%.2f status=timeout",
+                        model_name,
+                        elapsed_ms,
+                    )
+                else:
+                    logger.info(
+                        "gemini.call model=%s duration_ms=%.2f status=error",
+                        model_name,
+                        elapsed_ms,
+                    )
                 if self._is_model_not_found_error(exc):
                     last_model_error = exc
                     logger.warning("Gemini model unavailable model=%s, trying fallback", model_name)

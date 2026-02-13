@@ -224,7 +224,7 @@
   - Benchmark: `N/A`
 
 ## Commit B-10: perf(ux): PS-004 add upload progress indicator
-- Commit: `pending`
+- Commit: `18cac49`
 - Files:
   - `prometheus-app/app/(tabs)/scan.tsx`
 - Commands:
@@ -232,4 +232,16 @@
   - Benchmark: `N/A (master plan does not define a CLI benchmark for this UX task)`
 - Result:
   - Tests: `PASS` (`4 suites, 20 tests`)
+  - Benchmark: `N/A`
+
+## Commit B-11: perf(observability): OM-002 log gemini call duration
+- Commit: `pending`
+- Files:
+  - `prometheus-api/app/services/gemini_service.py`
+  - `prometheus-api/tests/test_services/test_gemini_service.py`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this observability task)`
+- Result:
+  - Tests: `PASS` (`42 passed`)
   - Benchmark: `N/A`
