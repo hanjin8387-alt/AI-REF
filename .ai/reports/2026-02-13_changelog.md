@@ -178,3 +178,21 @@
   - `cd prometheus-api && python -m pytest tests/test_scans.py -v` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `4 passed`, exit code `0`.
+
+## B-10 ??fix(app): UX-001 add accessibility labels to interactive elements
+- Code changes:
+  - Updated app tab screens to add contextual `accessibilityLabel` on all touchable controls:
+    - `prometheus-app/app/(tabs)/index.tsx`
+    - `prometheus-app/app/(tabs)/scan.tsx`
+    - `prometheus-app/app/(tabs)/inventory.tsx`
+    - `prometheus-app/app/(tabs)/shopping.tsx`
+    - `prometheus-app/app/(tabs)/history.tsx`
+    - `prometheus-app/app/(tabs)/alerts.tsx`
+  - Updated shared components for accessibility consistency:
+    - `prometheus-app/components/RoundButton.tsx` (added `accessibilityLabel` prop and default behavior)
+    - `prometheus-app/components/RecipeCardStack.tsx` (added accessibility metadata for top swipe card)
+  - Verified via JSX AST scan that touchable elements in `prometheus-app/components` and `prometheus-app/app/(tabs)` have `accessibilityLabel`.
+- Test command:
+  - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
+- Test result:
+  - `1 passed`, exit code `0`.
