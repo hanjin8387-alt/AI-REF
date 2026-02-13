@@ -308,7 +308,7 @@
   - Perf smoke: `PASS` (`/health avg=81.4ms p95=84.0ms`, `/inventory avg=83.5ms p95=87.7ms`)
 
 ## Commit P2-2: perf(api): BL-005 add async recipe recommendation polling
-- Commit: `pending`
+- Commit: `5d4c424`
 - Files:
   - `prometheus-api/app/api/recipes.py`
   - `prometheus-api/app/schemas/schemas.py`
@@ -321,3 +321,23 @@
 - Result:
   - Tests: `PASS` (`api: 46 passed / app: 4 suites, 21 tests`)
   - Perf smoke: `PASS` (`/health avg=91.8ms p95=171.9ms`, `/inventory avg=87.0ms p95=107.4ms`)
+
+## Commit P2-3: perf(build): BS-002 adopt Docker multi-stage runtime install
+- Commit: `(pending)`
+- Files:
+  - `prometheus-api/Dockerfile`
+- Commands:
+  - Build: `$env:PATH='C:\\Program Files\\Docker\\Docker\\resources\\bin;'+$env:PATH; docker build --no-cache -t prometheus-api:perf-ms ./prometheus-api`
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark: `docker images prometheus-api:perf-ms --format "{{.Repository}}:{{.Tag}} {{.Size}}"`
+- Result:
+  - Build: `PASS`
+  - Tests: `PASS` (`46 passed`)
+  - Benchmark: `PASS` (`prometheus-api:perf-ms 552MB`)
+- Metrics:
+  - Before: `prometheus-api:single-current-fresh 565MB`
+  - After: `prometheus-api:perf-ms 552MB`
+  - Delta: `-13MB`
+- Notes:
+  - Runtime layer bloat came from `COPY --from=builder /wheels /wheels` persistence.
+  - Switched to BuildKit `RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels` to avoid embedding wheel artifacts in final image.
