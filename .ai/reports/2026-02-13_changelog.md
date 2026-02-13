@@ -19,3 +19,12 @@
   - `cd prometheus-api && python -m pytest tests/test_security.py -v` (environment fallback: `py -m pytest tests/test_security.py -v`)
 - Test result:
   - `10 passed`, exit code `0`.
+
+## A-1 — security(api): SEC-001 use timing-safe comparison for admin token
+- Code changes:
+  - Updated `prometheus-api/app/api/admin.py` to use `secrets.compare_digest` in `_require_admin_token`.
+  - Added `prometheus-api/tests/test_admin.py` to verify timing-safe comparison call and admin token failure cases.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_admin.py -v` (environment fallback: `py -m pytest tests/test_admin.py -v`)
+- Test result:
+  - `3 passed`, exit code `0`.
