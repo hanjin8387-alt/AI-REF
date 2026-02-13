@@ -37,3 +37,10 @@ def test_process_time_headers_are_present(client) -> None:
     assert response_time is not None
     assert float(process_time) >= 0
     assert float(response_time) >= 0
+
+
+def test_cache_control_header_is_present_for_get_requests(client) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers.get("Cache-Control") == "private, max-age=15, stale-while-revalidate=30"

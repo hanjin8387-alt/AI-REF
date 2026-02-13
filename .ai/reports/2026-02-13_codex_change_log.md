@@ -162,7 +162,7 @@
   - Benchmark: `PASS` (`hey` unavailable in shell, fallback `status=401 total=0.087591s size=30`)
 
 ## Commit B-5: perf(network): NC-002 add request deduplication
-- Commit: `pending`
+- Commit: `d40bc77`
 - Files:
   - `prometheus-app/services/http-client.ts`
   - `prometheus-app/__tests__/http-client.test.ts`
@@ -172,3 +172,15 @@
 - Result:
   - Tests: `PASS` (`4 suites, 20 tests`)
   - Benchmark: `N/A`
+
+## Commit B-6: perf(api): NC-003 add Cache-Control headers
+- Commit: `pending`
+- Files:
+  - `prometheus-api/app/main.py`
+  - `prometheus-api/tests/test_main.py`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Perf smoke: `cd prometheus-api; py -c "from fastapi.testclient import TestClient; from app.main import app; r=TestClient(app).get('/'); print('cache_control=' + str(r.headers.get('cache-control'))); print('status=' + str(r.status_code))"`
+- Result:
+  - Tests: `PASS` (`41 passed`)
+  - Perf smoke: `PASS` (`cache_control=private, max-age=15, stale-while-revalidate=30`, `status=200`)

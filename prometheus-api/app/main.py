@@ -27,6 +27,7 @@ from .core.database import get_db
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
 REQUEST_ID_HEADER = "X-Request-ID"
+DEFAULT_CACHE_CONTROL = "private, max-age=15, stale-while-revalidate=30"
 
 
 @asynccontextmanager
@@ -126,6 +127,8 @@ async def request_id_middleware(request: Request, call_next):
     response.headers[REQUEST_ID_HEADER] = request_id
     response.headers["X-Process-Time"] = process_time
     response.headers["X-Response-Time"] = process_time
+    if request.method == "GET" and response.status_code < status.HTTP_400_BAD_REQUEST:
+        response.headers.setdefault("Cache-Control", DEFAULT_CACHE_CONTROL)
     return response
 
 
