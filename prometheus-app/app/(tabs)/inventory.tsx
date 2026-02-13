@@ -21,6 +21,7 @@ import { fireAndForget } from '@/utils/async';
 import { confirmDeleteItem } from '@/utils/confirmDelete';
 
 const PAGE_SIZE = 40;
+const INVENTORY_ROW_HEIGHT = 96;
 const STORAGE_GROUPS = ['냉장', '냉동', '상온', '미분류'] as const;
 type StorageGroup = (typeof STORAGE_GROUPS)[number];
 
@@ -79,6 +80,8 @@ export default function InventoryScreen() {
   const [sortBy, setSortBy] = useState<SortOption>('expiry_date');
   const [activeFilter, setActiveFilter] = useState<InventoryFilter>('all');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
 
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [editName, setEditName] = useState('');
@@ -118,6 +121,8 @@ export default function InventoryScreen() {
     }
 
     if (result.data) {
+      setOfflineMode(Boolean(result.data.offline));
+      setCacheTimestamp(result.data.cache_timestamp ?? null);
       setItems(prev => {
         const merged = reset ? result.data!.items : [...prev, ...result.data!.items];
         return dedupeById(merged);
@@ -125,6 +130,8 @@ export default function InventoryScreen() {
       setHasMore(result.data.has_more);
       setLoadError(null);
     } else if (reset) {
+      setOfflineMode(false);
+      setCacheTimestamp(null);
       setItems([]);
       setLoadError(result.error || '재고를 불러오지 못했어요.');
     }
@@ -320,6 +327,14 @@ export default function InventoryScreen() {
     { key: 'created_at', label: '최근' },
   ];
 
+  const getItemLayout = useCallback((_: unknown, index: number) => {
+    return {
+      length: INVENTORY_ROW_HEIGHT,
+      offset: INVENTORY_ROW_HEIGHT * index,
+      index,
+    };
+  }, []);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
@@ -328,6 +343,15 @@ export default function InventoryScreen() {
         <Text style={styles.title}>인벤토리</Text>
         <Text style={styles.subtitle}>{stats.total}개</Text>
       </View>
+
+      {offlineMode ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            오프라인 캐시 표시 중
+            {cacheTimestamp ? ` / 기준: ${new Date(cacheTimestamp).toLocaleString()}` : ''}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.statsContainer}>
         <View style={styles.statCard}>
@@ -410,11 +434,12 @@ export default function InventoryScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           showsVerticalScrollIndicator={false}
           stickySectionHeadersEnabled={false}
-          initialNumToRender={12}
-          maxToRenderPerBatch={12}
-          windowSize={9}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
           updateCellsBatchingPeriod={50}
           removeClippedSubviews
+          getItemLayout={getItemLayout}
           onEndReachedThreshold={0.3}
           onEndReached={onLoadMore}
           ListFooterComponent={
@@ -521,6 +546,21 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: Colors.gray600, marginTop: 4 },
 
   statsContainer: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginBottom: 12 },
+  offlineBanner: {
+    marginHorizontal: 24,
+    marginBottom: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFF4D9',
+    borderWidth: 1,
+    borderColor: '#F3D38C',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  offlineBannerText: {
+    color: '#8A5B00',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   statCard: {
     flex: 1,
     backgroundColor: Colors.white,
