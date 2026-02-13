@@ -323,7 +323,7 @@
   - Perf smoke: `PASS` (`/health avg=91.8ms p95=171.9ms`, `/inventory avg=87.0ms p95=107.4ms`)
 
 ## Commit P2-3: perf(build): BS-002 adopt Docker multi-stage runtime install
-- Commit: `(pending)`
+- Commit: `e8109cc`
 - Files:
   - `prometheus-api/Dockerfile`
 - Commands:
@@ -343,7 +343,7 @@
   - Switched to BuildKit `RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels` to avoid embedding wheel artifacts in final image.
 
 ## Commit P2-4: perf(build): BS-003 remove redundant direct dependency
-- Commit: `(pending)`
+- Commit: `0bd0035`
 - Files:
   - `prometheus-api/requirements.txt`
 - Commands:
@@ -362,7 +362,7 @@
   - Removed direct `python-dotenv` from `requirements.txt`; it is already pulled transitively by `pydantic-settings`.
 
 ## Commit P2-5: perf(build): BS-005 split runtime and dev requirements
-- Commit: `(pending)`
+- Commit: `60f14d0`
 - Files:
   - `prometheus-api/requirements.txt`
   - `prometheus-api/requirements-dev.txt`
@@ -381,3 +381,24 @@
 - Notes:
   - Runtime dependencies stay in `requirements.txt`.
   - Test-only packages moved to `requirements-dev.txt` to keep runtime image leaner.
+
+## Commit P2-6: perf(build): BS-004 convert web icons to WebP
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/public/manifest.json`
+  - `prometheus-app/public/sw.js`
+  - `prometheus-app/app/+html.tsx`
+  - `prometheus-app/public/favicon.webp`
+  - `prometheus-app/public/icons/icon-192.webp`
+  - `prometheus-app/public/icons/icon-512.webp`
+  - `prometheus-app/public/icons/maskable-icon-512.webp`
+  - `prometheus-app/public/icons/apple-touch-icon.webp`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `PowerShell size check (core web icon set bytes before/after)`
+- Result:
+  - Tests: `PASS` (`4 suites, 21 tests`)
+  - Benchmark: `PASS` (`before_bytes=106575`, `after_bytes=35393`, `delta_bytes=-71182`, `delta_percent=-66.79`)
+- Notes:
+  - Web assets now prefer WebP in `manifest`, service worker core cache, and html icon links.
+  - Existing PNG assets remain as compatibility fallback in manifest/html.
