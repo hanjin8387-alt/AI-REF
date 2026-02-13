@@ -112,3 +112,15 @@
 - Result:
   - Tests: `PASS` (`4 suites, 18 tests`)
   - Benchmark: `N/A (manual check)`
+
+## Commit B-1: perf(app): FR-003 wrap list items with React.memo
+- Commit: pending
+- Files:
+  - `prometheus-app/components/InventoryItemCard.tsx`
+  - `prometheus-app/components/RecipeCardStack.tsx`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `React DevTools Profiler` (manual)
+- Result:
+  - Tests: `PASS` (`4 suites, 18 tests`)
+  - Benchmark: `N/A (manual profiler required in UI runtime)`

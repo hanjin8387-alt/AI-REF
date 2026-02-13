@@ -25,7 +25,7 @@ function toKoreanDifficulty(value: string) {
   return value;
 }
 
-export function RecipeCardStack({ recipes, onSwipeLeft, onSwipeRight, onCardPress }: RecipeCardStackProps) {
+function RecipeCardStackComponent({ recipes, onSwipeLeft, onSwipeRight, onCardPress }: RecipeCardStackProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const position = useRef(new Animated.ValueXY()).current;
   const rotate = position.x.interpolate({
@@ -213,6 +213,9 @@ export function RecipeCardStack({ recipes, onSwipeLeft, onSwipeRight, onCardPres
 
   return <View style={styles.container}>{recipes.map((recipe, index) => renderCard(recipe, index)).reverse()}</View>;
 }
+
+export const RecipeCardStack = React.memo(RecipeCardStackComponent);
+RecipeCardStack.displayName = 'RecipeCardStack';
 
 const styles = StyleSheet.create({
   container: {
