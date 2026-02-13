@@ -110,3 +110,15 @@
   - `cd prometheus-api && python -m pytest tests/test_main.py -v -k "health"` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `1 passed`, exit code `0`.
+
+## B-4 — perf(api): PR-003 optimize bulk_upsert inventory query
+- Code changes:
+  - Updated `prometheus-api/app/services/inventory_service.py`:
+    - Changed inventory reads from `.select("*")` to `.select("id,name,quantity,unit,expiry_date,category")`.
+    - Added name-scoped `IN` filtering for existing-row lookup based on input item names.
+    - Applied explicit column selection to refreshed rows as well.
+  - Added `prometheus-api/tests/test_services/test_inventory_service.py`.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_inventory_service.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `2 passed`, exit code `0`.
