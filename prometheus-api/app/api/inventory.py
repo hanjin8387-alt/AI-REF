@@ -1,4 +1,5 @@
 ﻿import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,6 +38,7 @@ async def get_inventory(
     sort_by: str = Query("expiry_date", description="Sort key"),
     limit: int = Query(30, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    updated_since: Optional[datetime] = Query(None, description="Return rows updated since this timestamp"),
     device_id: str = Depends(get_device_id),
     db: Client = Depends(get_db),
 ):
@@ -44,6 +46,8 @@ async def get_inventory(
 
     if category:
         query = query.eq("category", category)
+    if updated_since is not None:
+        query = query.gte("updated_at", updated_since.astimezone(timezone.utc).isoformat())
 
     if sort_by == "expiry_date":
         query = query.order("expiry_date", desc=False, nullsfirst=False)
@@ -51,10 +55,12 @@ async def get_inventory(
         query = query.order("name", desc=False)
     elif sort_by == "created_at":
         query = query.order("created_at", desc=True)
+    elif sort_by == "updated_at":
+        query = query.order("updated_at", desc=True)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="sort_by must be one of: expiry_date, name, created_at.",
+            detail="sort_by must be one of: expiry_date, name, created_at, updated_at.",
         )
 
     result = query.range(offset, offset + limit - 1).execute()
@@ -307,6 +313,7 @@ async def restore_inventory_item(
     )
 
     return restored
+
 
 
 

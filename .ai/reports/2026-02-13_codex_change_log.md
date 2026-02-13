@@ -383,7 +383,7 @@
   - Test-only packages moved to `requirements-dev.txt` to keep runtime image leaner.
 
 ## Commit P2-6: perf(build): BS-004 convert web icons to WebP
-- Commit: `(pending)`
+- Commit: `e713bb9`
 - Files:
   - `prometheus-app/public/manifest.json`
   - `prometheus-app/public/sw.js`
@@ -402,3 +402,24 @@
 - Notes:
   - Web assets now prefer WebP in `manifest`, service worker core cache, and html icon links.
   - Existing PNG assets remain as compatibility fallback in manifest/html.
+
+## Commit P2-7: perf(network): NC-005 add offline delta sync
+- Commit: `(pending)`
+- Files:
+  - `prometheus-api/app/api/inventory.py`
+  - `prometheus-api/app/api/recipes.py`
+  - `prometheus-api/app/api/shopping.py`
+  - `prometheus-api/tests/test_delta_sync_filters.py`
+  - `prometheus-app/services/api.ts`
+  - `prometheus-app/__tests__/api-delta-sync.test.ts`
+- Commands:
+  - Test (api): `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`api: 49 passed / app: 5 suites, 25 tests`)
+  - Perf smoke: `PASS` (`/health avg=523.2ms p95=4467.9ms`, `/inventory avg=86.7ms p95=98.5ms`)
+- Notes:
+  - Added `updated_since` delta filters to inventory/favorites/shopping read endpoints.
+  - Added app-side delta merge flow and retry hook-up (`retryPendingSync` -> `syncOfflineDelta`).
+  - First perf-smoke invocation failed due PowerShell path quoting; rerun command passed with the same inputs.

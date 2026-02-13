@@ -272,6 +272,7 @@ async def get_shopping_items(
     status_filter: Optional[ShoppingItemStatus] = Query(None, alias="status"),
     limit: int = Query(30, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    updated_since: Optional[datetime] = Query(None, description="Return rows updated since this timestamp"),
     device_id: str = Depends(get_device_id),
     db: Client = Depends(get_db),
 ):
@@ -279,6 +280,8 @@ async def get_shopping_items(
         query = db.table("shopping_items").select(SHOPPING_ITEM_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
         if status_filter is not None:
             query = query.eq("status", status_filter.value)
+        if updated_since is not None:
+            query = query.gte("updated_at", updated_since.astimezone(timezone.utc).isoformat())
 
         result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
         rows = result.data or []

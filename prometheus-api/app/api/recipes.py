@@ -306,17 +306,15 @@ async def get_recommendation_job_status(
 async def get_favorite_recipes(
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    updated_since: datetime | None = Query(None, description="Return rows created since this timestamp"),
     device_id: str = Depends(get_device_id),
     db: Client = Depends(get_db),
 ):
-    result = (
-        db.table("favorite_recipes")
-        .select(FAVORITE_RECIPE_SELECT_COLUMNS, count="exact")
-        .eq("device_id", device_id)
-        .order("created_at", desc=True)
-        .range(offset, offset + limit - 1)
-        .execute()
-    )
+    query = db.table("favorite_recipes").select(FAVORITE_RECIPE_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
+    if updated_since is not None:
+        query = query.gte("created_at", updated_since.astimezone(timezone.utc).isoformat())
+
+    result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
 
     rows = result.data or []
     recipes: list[Recipe] = []
