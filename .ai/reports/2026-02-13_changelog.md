@@ -42,3 +42,15 @@
   - First run failed due `docker-credential-desktop` not in PATH.
   - Minimal fix applied: Docker `resources\bin` appended to PATH for the session.
   - Rerun succeeded and container user output was `appuser`.
+
+## A-3 — perf(api): PR-001 add explicit timeout to gemini API calls
+- Code changes:
+  - Updated `prometheus-api/app/services/gemini_service.py`:
+    - Added module constant `GEMINI_TIMEOUT_SECONDS = 30`.
+    - Wrapped `generate_content_async(...)` with `asyncio.wait_for(..., timeout=GEMINI_TIMEOUT_SECONDS)`.
+  - Added `prometheus-api/tests/test_services/test_gemini_service.py` for timeout behavior.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_gemini_service.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `2 passed`, exit code `0`.
+  - First run had one coroutine cleanup warning in timeout test; minimal test fix applied and rerun passed without that warning.
