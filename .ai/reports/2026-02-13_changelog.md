@@ -54,3 +54,16 @@
 - Test result:
   - `2 passed`, exit code `0`.
   - First run had one coroutine cleanup warning in timeout test; minimal test fix applied and rerun passed without that warning.
+
+## A-4 — perf(api): PR-002 add max size limit to in-memory recipe cache
+- Code changes:
+  - Updated `prometheus-api/app/services/recipe_cache.py`:
+    - Added `max_devices=100` constructor parameter (with minimum guard).
+    - Added per-device update timestamp tracking.
+    - Added max-size pruning in `_prune_locked()` to evict oldest devices when limit is exceeded.
+    - Ensured timestamp cleanup on expiry/invalidate paths.
+  - Added `prometheus-api/tests/test_services/test_recipe_cache.py` for size-limit and minimum-size behavior.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_recipe_cache.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `2 passed`, exit code `0`.
