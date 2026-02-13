@@ -122,3 +122,25 @@
   - `cd prometheus-api && python -m pytest tests/test_services/test_inventory_service.py -v` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `2 passed`, exit code `0`.
+
+## B-5 — fix(api): CR-007 promote gemini model fallback log to warning
+- Status:
+  - Already satisfied before this step: fallback log in `prometheus-api/app/services/gemini_service.py` is already `logger.warning(...)`.
+- Verification test:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_gemini_service.py -v` (environment fallback: `py -m pytest ...`)
+  - Result: `2 passed`, exit code `0`.
+- Action:
+  - No additional code change required.
+
+## B-6 — chore(test): TE-SETUP-002 initialize jest infrastructure
+- Code changes:
+  - Added `prometheus-app/jest.config.js`.
+  - Added `prometheus-app/__tests__/setup.ts`.
+  - Updated `prometheus-app/package.json`:
+    - Added `test` script.
+    - Added dev dependencies: `jest`, `jest-expo`, `@testing-library/react-native`.
+  - Updated `prometheus-app/package-lock.json` via `npm install`.
+- Test command:
+  - `cd prometheus-app && npm test -- --passWithNoTests` (execution used `npm.cmd` due PowerShell execution policy)
+- Test result:
+  - `No tests found, exiting with code 0`.
