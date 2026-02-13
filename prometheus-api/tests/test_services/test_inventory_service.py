@@ -79,3 +79,30 @@ def test_bulk_upsert_merges_existing_quantity(mock_supabase) -> None:
     assert len(items) == 1
     assert items[0].name == "Milk"
     assert items[0].quantity == 2.0
+
+
+def test_bulk_upsert_returns_empty_for_empty_input(mock_supabase) -> None:
+    added_count, updated_count, items = bulk_upsert_inventory(mock_supabase, "device-1", [])
+
+    assert added_count == 0
+    assert updated_count == 0
+    assert items == []
+
+
+def test_bulk_upsert_uses_earliest_expiry_for_same_item(mock_supabase) -> None:
+    added_count, updated_count, items = bulk_upsert_inventory(
+        mock_supabase,
+        "device-1",
+        [
+            {"name": "Apple", "quantity": 1, "unit": "ea", "expiry_date": "2026-02-20"},
+            {"name": "apple", "quantity": 1, "unit": "ea", "expiry_date": "2026-02-18"},
+        ],
+    )
+
+    assert added_count == 1
+    assert updated_count == 0
+    assert len(items) == 1
+    assert items[0].name == "Apple"
+    assert items[0].quantity == 2.0
+    assert items[0].expiry_date is not None
+    assert items[0].expiry_date.date().isoformat() == "2026-02-18"

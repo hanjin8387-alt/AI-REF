@@ -155,3 +155,14 @@
   - `cd prometheus-api && python -m pytest tests/test_services/test_gemini_service.py -v` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `4 passed`, exit code `0`.
+
+## B-8 — test(api): TE-003 add inventory service unit tests
+- Code changes:
+  - Expanded `prometheus-api/tests/test_services/test_inventory_service.py`:
+    - Added empty-input guard test.
+    - Added earliest-expiry merge behavior test for duplicate item names.
+    - Kept query-shape and quantity-merge tests.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_inventory_service.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `4 passed`, exit code `0`.
