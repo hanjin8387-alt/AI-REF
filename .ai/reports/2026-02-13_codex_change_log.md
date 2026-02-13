@@ -261,7 +261,7 @@
   - Benchmark: `N/A`
 
 ## Commit B-13: perf(network): PRL-002 limit client cache map size
-- Commit: `pending`
+- Commit: `0700ab2`
 - Files:
   - `prometheus-app/services/http-client.ts`
   - `prometheus-app/__tests__/http-client.test.ts`
@@ -271,3 +271,12 @@
 - Result:
   - Tests: `PASS` (`4 suites, 21 tests`)
   - Benchmark: `N/A`
+
+## Commit B-14: chore(perf): PRL-003 add perf smoke benchmark script
+- Commit: `pending`
+- Files:
+  - `scripts/perf-smoke.sh`
+- Commands:
+  - Perf smoke: `C:\Program Files\Git\bin\bash.exe -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Perf smoke: `PASS` (`/health avg=91.2ms p95=164.8ms`, `/inventory avg=86.3ms p95=95.5ms`)
