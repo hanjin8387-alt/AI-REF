@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import Colors from '@/constants/Colors';
 import { InventoryItemCard } from '@/components/InventoryItemCard';
@@ -73,6 +73,7 @@ function dedupeById(items: InventoryItem[]): InventoryItem[] {
 }
 
 export default function InventoryScreen() {
+  const router = useRouter();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -167,6 +168,10 @@ export default function InventoryScreen() {
     setLoadingMore(true);
     fireAndForget(fetchInventory(false), message => setLoadError(message), '재고 추가 로드 실패');
   }, [fetchInventory, hasMore, loading, loadingMore, refreshing]);
+
+  const openScanTab = useCallback(() => {
+    router.push('/(tabs)/scan');
+  }, [router]);
 
   const openEditModal = useCallback((item: InventoryItem) => {
     setEditingItem(item);
@@ -477,6 +482,11 @@ export default function InventoryScreen() {
           <Text style={styles.messageText}>
             {items.length === 0 ? loadError || '스캔 탭에서 재료를 추가해보세요.' : '필터를 바꾸거나 정렬을 확인해 보세요.'}
           </Text>
+          {items.length === 0 ? (
+            <TouchableOpacity style={styles.emptyPrimaryButton} onPress={openScanTab} accessibilityLabel="스캔 탭으로 이동">
+              <Text style={styles.emptyPrimaryButtonText}>스캔하러 가기</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => fireAndForget(fetchInventory(true), message => setLoadError(message), '재고 로드 실패')}
@@ -685,6 +695,19 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   messageTitle: { color: '#132018', fontSize: 20, fontWeight: '700', marginBottom: 8 },
   messageText: { color: Colors.gray600, textAlign: 'center' },
+  emptyPrimaryButton: {
+    marginTop: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#A5DFC4',
+    backgroundColor: '#E8F8F2',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  emptyPrimaryButtonText: {
+    color: Colors.primaryDark,
+    fontWeight: '700',
+  },
   retryButton: {
     marginTop: 14,
     backgroundColor: Colors.primary,

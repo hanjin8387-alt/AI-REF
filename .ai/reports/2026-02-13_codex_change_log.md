@@ -441,7 +441,7 @@
   - Added dedicated worker parser unit tests for normal, worker, and fallback paths.
 
 ## Commit P2-9: perf(ux): FR-006 add image placeholder and fade-in
-- Commit: `(pending)`
+- Commit: `9f2cc4a`
 - Files:
   - `prometheus-app/components/RecipeCardStack.tsx`
 - Commands:
@@ -453,3 +453,20 @@
 - Notes:
   - Recipe card image now shows a loading placeholder and cross-fades into the final image on load.
   - Image load failure still falls back to the static recipe placeholder block.
+
+## Commit P2-10: perf(ux): PS-005 add empty-state CTAs on key tabs
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/app/(tabs)/index.tsx`
+  - `prometheus-app/app/(tabs)/inventory.tsx`
+  - `prometheus-app/app/(tabs)/shopping.tsx`
+  - `prometheus-app/__tests__/inventory-screen.test.tsx`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 28 tests`)
+  - Perf smoke: `PASS` (`/health avg=83.0ms p95=95.9ms`, `/inventory avg=86.0ms p95=98.8ms`)
+- Notes:
+  - Added direct empty-state actions for home/favorites, inventory, and shopping tabs.
+  - First app test run failed because `useRouter` mock was missing in `inventory-screen` test; added minimal mock and reran successfully.

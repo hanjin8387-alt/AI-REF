@@ -10,6 +10,9 @@ jest.mock('expo-router', () => ({
     const ReactLocal = require('react');
     ReactLocal.useEffect(() => callback(), [callback]);
   },
+  useRouter: () => ({
+    push: jest.fn(),
+  }),
 }));
 
 jest.mock('@/components/InventoryItemCard', () => {

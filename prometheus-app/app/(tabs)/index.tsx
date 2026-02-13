@@ -279,6 +279,10 @@ export default function HomeScreen() {
     router.push('/(tabs)/inventory');
   }, [router]);
 
+  const openScan = useCallback(() => {
+    router.push('/(tabs)/scan');
+  }, [router]);
+
   const setRecommendedMode = useCallback(() => {
     setFeedMode('recommended');
   }, []);
@@ -409,6 +413,23 @@ export default function HomeScreen() {
           <View style={styles.centered}>
             <Text style={styles.emptyTitle}>{feedMode === 'favorites' ? '즐겨찾기 레시피가 없어요' : '레시피가 없어요'}</Text>
             <Text style={styles.emptyText}>{loadError || '재료를 스캔하면 추천 레시피를 볼 수 있어요.'}</Text>
+            {feedMode === 'favorites' ? (
+              <TouchableOpacity
+                style={styles.emptyPrimaryButton}
+                onPress={setRecommendedMode}
+                accessibilityLabel="추천 레시피 보기"
+              >
+                <Text style={styles.emptyPrimaryButtonText}>추천 레시피 보기</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.emptyPrimaryButton}
+                onPress={openScan}
+                accessibilityLabel="스캔 탭으로 이동"
+              >
+                <Text style={styles.emptyPrimaryButtonText}>스캔하러 가기</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.retryButton}
               onPress={retryRecipes}
@@ -586,6 +607,16 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   emptyTitle: { color: '#132018', fontSize: 18, fontWeight: '700', marginBottom: 8 },
   emptyText: { color: Colors.gray600, textAlign: 'center' },
+  emptyPrimaryButton: {
+    marginTop: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#A5DFC4',
+    backgroundColor: '#E8F8F2',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  emptyPrimaryButtonText: { color: Colors.primaryDark, fontWeight: '700' },
   retryButton: { marginTop: 12, backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   retryButtonText: { color: Colors.white, fontWeight: '700' },
   footerActions: { paddingHorizontal: 24, paddingBottom: 16, paddingTop: 8 },

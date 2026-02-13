@@ -442,6 +442,9 @@ export default function ShoppingScreen() {
         <View style={styles.centered}>
           <Text style={styles.infoTitle}>장보기 항목이 없어요</Text>
           <Text style={styles.infoText}>{error || '레시피 또는 직접 입력으로 항목을 추가해보세요.'}</Text>
+          <TouchableOpacity style={styles.emptyPrimaryButton} onPress={openAddModal} accessibilityLabel="장보기 항목 직접 추가">
+            <Text style={styles.emptyPrimaryButtonText}>직접 추가하기</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -704,6 +707,19 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   infoTitle: { color: '#132018', fontSize: 20, fontWeight: '700', marginBottom: 8 },
   infoText: { color: Colors.gray600, textAlign: 'center' },
+  emptyPrimaryButton: {
+    marginTop: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#A5DFC4',
+    backgroundColor: '#E8F8F2',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  emptyPrimaryButtonText: {
+    color: Colors.primaryDark,
+    fontWeight: '700',
+  },
   footerText: { textAlign: 'center', color: Colors.gray600, marginVertical: 14 },
   modalOverlay: {
     flex: 1,
