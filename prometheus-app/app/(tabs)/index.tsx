@@ -58,7 +58,7 @@ export default function HomeScreen() {
     [selectedRecipe]
   );
 
-  const setRecipeFavoriteLocally = (recipeId: string, isFavorite: boolean) => {
+  const setRecipeFavoriteLocally = useCallback((recipeId: string, isFavorite: boolean) => {
     setRecipes(prev => {
       const updated = prev.map(recipe => (recipe.id === recipeId ? { ...recipe, is_favorite: isFavorite } : recipe));
       if (feedMode === 'favorites') {
@@ -67,16 +67,16 @@ export default function HomeScreen() {
       return updated;
     });
     setSelectedRecipe(prev => (prev && prev.id === recipeId ? { ...prev, is_favorite: isFavorite } : prev));
-  };
+  }, [feedMode]);
 
-  const loadFeed = async (forceRefresh = false) => {
+  const loadFeed = useCallback(async (forceRefresh = false) => {
     if (feedMode === 'recommended') {
       return api.getRecommendations(7, forceRefresh);
     }
     return api.getFavoriteRecipes(60, 0);
-  };
+  }, [feedMode]);
 
-  const loadHomeSummary = async () => {
+  const loadHomeSummary = useCallback(async () => {
     const [inventoryResult, notificationResult] = await Promise.all([
       api.getInventory(undefined, 'expiry_date', 200, 0),
       api.getNotifications(1, 0, true),
@@ -99,9 +99,9 @@ export default function HomeScreen() {
       .map(entry => entry.item);
 
     setExpiringItems(soonest);
-  };
+  }, []);
 
-  const refreshAll = async (forceRefresh = false) => {
+  const refreshAll = useCallback(async (forceRefresh = false) => {
     if (!loading) setRefreshing(true);
     const [feedResult] = await Promise.all([loadFeed(forceRefresh), loadHomeSummary()]);
 
@@ -115,15 +115,15 @@ export default function HomeScreen() {
 
     setLoading(false);
     setRefreshing(false);
-  };
+  }, [loadFeed, loadHomeSummary, loading]);
 
   useFocusEffect(
     useCallback(() => {
       fireAndForget(refreshAll(false), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패');
-    }, [feedMode])
+    }, [refreshAll])
   );
 
-  const openRecipeDetail = (recipe: ApiRecipe) => {
+  const openRecipeDetail = useCallback((recipe: ApiRecipe) => {
     setSelectedRecipe(recipe);
     setSelectedServings(Math.max(1, recipe.servings || 1));
     fireAndForget(
@@ -136,14 +136,14 @@ export default function HomeScreen() {
       () => { },
       '레시피 상세 로드 실패'
     );
-  };
+  }, []);
 
-  const closeRecipeDetail = () => {
+  const closeRecipeDetail = useCallback(() => {
     setSelectedRecipe(null);
     setSelectedServings(1);
-  };
+  }, []);
 
-  const cookRecipe = async (recipe: ApiRecipe, servings = 1) => {
+  const cookRecipe = useCallback(async (recipe: ApiRecipe, servings = 1) => {
     if (isCooking) return;
     setIsCooking(true);
     try {
@@ -158,9 +158,9 @@ export default function HomeScreen() {
     } finally {
       setIsCooking(false);
     }
-  };
+  }, [closeRecipeDetail, isCooking, refreshAll]);
 
-  const toggleFavorite = async (recipe: ApiRecipe) => {
+  const toggleFavorite = useCallback(async (recipe: ApiRecipe) => {
     if (favoriteBusy) return;
     setFavoriteBusy(true);
     try {
@@ -182,9 +182,9 @@ export default function HomeScreen() {
     } finally {
       setFavoriteBusy(false);
     }
-  };
+  }, [favoriteBusy, setRecipeFavoriteLocally]);
 
-  const addMissingIngredients = async () => {
+  const addMissingIngredients = useCallback(async () => {
     if (!selectedRecipe || !missingIngredients.length || addingMissing) return;
     setAddingMissing(true);
     try {
@@ -205,9 +205,9 @@ export default function HomeScreen() {
     } finally {
       setAddingMissing(false);
     }
-  };
+  }, [addingMissing, missingIngredients, refreshAll, selectedRecipe, selectedServings]);
 
-  const addMissingIngredientsToShopping = async () => {
+  const addMissingIngredientsToShopping = useCallback(async () => {
     if (!selectedRecipe || !missingIngredients.length || addingMissingToShopping) return;
     setAddingMissingToShopping(true);
     try {
@@ -234,7 +234,62 @@ export default function HomeScreen() {
     } finally {
       setAddingMissingToShopping(false);
     }
-  };
+  }, [addingMissingToShopping, missingIngredients, selectedRecipe, selectedServings]);
+
+  const openAlerts = useCallback(() => {
+    router.push('/(tabs)/alerts');
+  }, [router]);
+
+  const openInventory = useCallback(() => {
+    router.push('/(tabs)/inventory');
+  }, [router]);
+
+  const setRecommendedMode = useCallback(() => {
+    setFeedMode('recommended');
+  }, []);
+
+  const setFavoritesMode = useCallback(() => {
+    setFeedMode('favorites');
+  }, []);
+
+  const handleSwipeCook = useCallback((recipe: ApiRecipe) => {
+    fireAndForget(cookRecipe(recipe, 1), message => Alert.alert('요리 실패', message), '요리 처리 실패');
+  }, [cookRecipe]);
+
+  const retryRecipes = useCallback(() => {
+    setLoading(true);
+    fireAndForget(refreshAll(true), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패');
+  }, [refreshAll]);
+
+  const refreshHome = useCallback(() => {
+    fireAndForget(refreshAll(true), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패');
+  }, [refreshAll]);
+
+  const toggleFavoriteForSelected = useCallback(() => {
+    if (!selectedRecipe) return;
+    fireAndForget(toggleFavorite(selectedRecipe), message => Alert.alert('즐겨찾기 변경 실패', message), '즐겨찾기 변경 실패');
+  }, [selectedRecipe, toggleFavorite]);
+
+  const addMissingToInventory = useCallback(() => {
+    fireAndForget(addMissingIngredients(), message => Alert.alert('추가 실패', message), '부족 재료 추가 실패');
+  }, [addMissingIngredients]);
+
+  const addMissingToShopping = useCallback(() => {
+    fireAndForget(addMissingIngredientsToShopping(), message => Alert.alert('추가 실패', message), '장보기 추가 실패');
+  }, [addMissingIngredientsToShopping]);
+
+  const decreaseServings = useCallback(() => {
+    setSelectedServings(prev => Math.max(1, prev - 1));
+  }, []);
+
+  const increaseServings = useCallback(() => {
+    setSelectedServings(prev => prev + 1);
+  }, []);
+
+  const cookSelectedRecipe = useCallback(() => {
+    if (!selectedRecipe) return;
+    fireAndForget(cookRecipe(selectedRecipe, selectedServings), message => Alert.alert('요리 실패', message), '요리 처리 실패');
+  }, [cookRecipe, selectedRecipe, selectedServings]);
 
   return (
     <View style={styles.container}>
@@ -247,7 +302,7 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity
           style={styles.alertButton}
-          onPress={() => router.push('/(tabs)/alerts')}
+          onPress={openAlerts}
           accessibilityRole="button"
           accessibilityLabel="알림 화면으로 이동"
           hitSlop={10}
@@ -275,7 +330,7 @@ export default function HomeScreen() {
             })}
             <TouchableOpacity
               style={styles.expiringAction}
-              onPress={() => router.push('/(tabs)/inventory')}
+              onPress={openInventory}
               accessibilityLabel="인벤토리에서 임박 재료 확인"
             >
               <Text style={styles.expiringActionText}>인벤토리에서 확인</Text>
@@ -287,7 +342,7 @@ export default function HomeScreen() {
       <View style={styles.feedToggle}>
         <TouchableOpacity
           style={[styles.feedButton, feedMode === 'recommended' && styles.feedButtonActive]}
-          onPress={() => setFeedMode('recommended')}
+          onPress={setRecommendedMode}
           accessibilityRole="button"
           accessibilityLabel="추천 레시피 보기"
         >
@@ -295,7 +350,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.feedButton, feedMode === 'favorites' && styles.feedButtonActive]}
-          onPress={() => setFeedMode('favorites')}
+          onPress={setFavoritesMode}
           accessibilityRole="button"
           accessibilityLabel="즐겨찾기 레시피 보기"
         >
@@ -312,9 +367,7 @@ export default function HomeScreen() {
           <RecipeCardStack
             recipes={recipes}
             onCardPress={openRecipeDetail}
-            onSwipeRight={recipe => {
-              fireAndForget(cookRecipe(recipe, 1), message => Alert.alert('요리 실패', message), '요리 처리 실패');
-            }}
+            onSwipeRight={handleSwipeCook}
           />
         ) : (
           <View style={styles.centered}>
@@ -322,10 +375,7 @@ export default function HomeScreen() {
             <Text style={styles.emptyText}>{loadError || '재료를 스캔하면 추천 레시피를 볼 수 있어요.'}</Text>
             <TouchableOpacity
               style={styles.retryButton}
-              onPress={() => {
-                setLoading(true);
-                fireAndForget(refreshAll(true), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패');
-              }}
+              onPress={retryRecipes}
               accessibilityLabel="홈 레시피 다시 시도"
             >
               <Text style={styles.retryButtonText}>다시 시도</Text>
@@ -337,7 +387,7 @@ export default function HomeScreen() {
       <View style={styles.footerActions}>
         <TouchableOpacity
           style={styles.footerButton}
-          onPress={() => fireAndForget(refreshAll(true), message => Alert.alert('새로고침 실패', message), '홈 새로고침 실패')}
+          onPress={refreshHome}
           disabled={refreshing}
           accessibilityLabel="홈 새로고침"
         >
@@ -354,12 +404,7 @@ export default function HomeScreen() {
                   <Text style={styles.modalTitle}>{selectedRecipe.title}</Text>
                   <TouchableOpacity
                     style={styles.favoriteButton}
-                    onPress={() => fireAndForget(
-                        toggleFavorite(selectedRecipe),
-                        message => Alert.alert('즐겨찾기 변경 실패', message),
-                        '즐겨찾기 변경 실패'
-                      )
-                    }
+                    onPress={toggleFavoriteForSelected}
                     disabled={favoriteBusy}
                     accessibilityLabel={selectedRecipe.is_favorite ? '즐겨찾기 해제' : '즐겨찾기 추가'}
                   >
@@ -386,7 +431,7 @@ export default function HomeScreen() {
                   <>
                     <TouchableOpacity
                       style={styles.addMissingButton}
-                      onPress={() => fireAndForget(addMissingIngredients(), message => Alert.alert('추가 실패', message), '부족 재료 추가 실패')}
+                      onPress={addMissingToInventory}
                       disabled={addingMissing}
                       accessibilityLabel={`부족한 재료 ${missingIngredients.length}개 인벤토리에 추가`}
                     >
@@ -396,12 +441,7 @@ export default function HomeScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.addShoppingButton}
-                      onPress={() => fireAndForget(
-                          addMissingIngredientsToShopping(),
-                          message => Alert.alert('추가 실패', message),
-                          '장보기 추가 실패'
-                        )
-                      }
+                      onPress={addMissingToShopping}
                       disabled={addingMissingToShopping}
                       accessibilityLabel={`부족한 재료 ${missingIngredients.length}개 장보기에 추가`}
                     >
@@ -422,7 +462,7 @@ export default function HomeScreen() {
                 <View style={styles.servingsRow}>
                   <TouchableOpacity
                     style={styles.servingsButton}
-                    onPress={() => setSelectedServings(prev => Math.max(1, prev - 1))}
+                    onPress={decreaseServings}
                     accessibilityLabel="인분 감소"
                   >
                     <Text style={styles.servingsButtonText}>-</Text>
@@ -430,7 +470,7 @@ export default function HomeScreen() {
                   <Text style={styles.servingsText}>인분: {selectedServings}</Text>
                   <TouchableOpacity
                     style={styles.servingsButton}
-                    onPress={() => setSelectedServings(prev => prev + 1)}
+                    onPress={increaseServings}
                     accessibilityLabel="인분 증가"
                   >
                     <Text style={styles.servingsButtonText}>+</Text>
@@ -448,9 +488,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.cookButton}
-                    onPress={() => {
-                      fireAndForget(cookRecipe(selectedRecipe, selectedServings), message => Alert.alert('요리 실패', message), '요리 처리 실패');
-                    }}
+                    onPress={cookSelectedRecipe}
                     disabled={isCooking}
                     accessibilityLabel="선택한 인분으로 요리 시작"
                   >

@@ -114,10 +114,23 @@
   - Benchmark: `N/A (manual check)`
 
 ## Commit B-1: perf(app): FR-003 wrap list items with React.memo
-- Commit: pending
+- Commit: `f72855a`
 - Files:
   - `prometheus-app/components/InventoryItemCard.tsx`
   - `prometheus-app/components/RecipeCardStack.tsx`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `React DevTools Profiler` (manual)
+- Result:
+  - Tests: `PASS` (`4 suites, 18 tests`)
+  - Benchmark: `N/A (manual profiler required in UI runtime)`
+
+## Commit B-2: perf(app): FR-002 replace inline handlers with useCallback
+- Commit: pending
+- Files:
+  - `prometheus-app/app/(tabs)/index.tsx`
+  - `prometheus-app/app/(tabs)/inventory.tsx`
+  - `prometheus-app/app/(tabs)/shopping.tsx`
 - Commands:
   - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
   - Benchmark: `React DevTools Profiler` (manual)

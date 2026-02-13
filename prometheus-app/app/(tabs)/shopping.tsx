@@ -125,22 +125,22 @@ export default function ShoppingScreen() {
     }, [statusFilter])
   );
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     fireAndForget(loadShopping(true), message => setError(message), '장보기 새로고침 실패');
-  };
+  }, [loadShopping]);
 
-  const onLoadMore = () => {
+  const onLoadMore = useCallback(() => {
     if (!hasMore || loading || loadingMore || refreshing) return;
     setLoadingMore(true);
     fireAndForget(loadShopping(false), message => setError(message), '장보기 추가 로드 실패');
-  };
+  }, [hasMore, loading, loadingMore, refreshing, loadShopping]);
 
-  const resetAddForm = () => {
+  const resetAddForm = useCallback(() => {
     setNewName('');
     setNewQuantity('1');
     setNewUnit('개');
-  };
+  }, []);
 
   const addManualItem = async () => {
     if (submitting) return;
@@ -210,7 +210,7 @@ export default function ShoppingScreen() {
     );
   };
 
-  const checkoutAllPending = () => {
+  const checkoutAllPending = useCallback(() => {
     if (pendingCount <= 0) return;
     Alert.alert('전체 구매 처리', '구매 예정 항목을 모두 구매 완료로 바꾸고 인벤토리까지 반영할까요?', [
       { text: '취소', style: 'cancel' },
@@ -224,7 +224,20 @@ export default function ShoppingScreen() {
           ),
       },
     ]);
-  };
+  }, [pendingCount, checkoutItems]);
+
+  const openAddModal = useCallback(() => {
+    setShowAddModal(true);
+  }, []);
+
+  const toggleStoreMode = useCallback(() => {
+    setStoreMode(prev => !prev);
+  }, []);
+
+  const closeAddModal = useCallback(() => {
+    setShowAddModal(false);
+    resetAddForm();
+  }, [resetAddForm]);
 
   const deleteItem = (item: ShoppingItem) => {
     confirmDeleteItem(item.name, () => {
@@ -352,7 +365,7 @@ export default function ShoppingScreen() {
           ))}
         </View>
         <View style={styles.toolButtons}>
-          <TouchableOpacity style={styles.addButton} onPress={() => setShowAddModal(true)} accessibilityLabel="장보기 항목 추가 열기">
+          <TouchableOpacity style={styles.addButton} onPress={openAddModal} accessibilityLabel="장보기 항목 추가 열기">
             <Text style={styles.addButtonText}>+ 항목 추가</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -369,7 +382,7 @@ export default function ShoppingScreen() {
       <View style={styles.storeModeRow}>
         <TouchableOpacity
           style={[styles.storeModeToggle, storeMode && styles.storeModeToggleActive]}
-          onPress={() => setStoreMode(prev => !prev)}
+          onPress={toggleStoreMode}
           accessibilityLabel={storeMode ? '매장 모드 끄기' : '매장 모드 켜기'}
         >
           <Text style={[styles.storeModeToggleText, storeMode && styles.storeModeToggleTextActive]}>
@@ -472,10 +485,7 @@ export default function ShoppingScreen() {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.modalCancel}
-                onPress={() => {
-                  setShowAddModal(false);
-                  resetAddForm();
-                }}
+                onPress={closeAddModal}
                 disabled={submitting}
                 accessibilityLabel="장보기 추가 취소"
               >

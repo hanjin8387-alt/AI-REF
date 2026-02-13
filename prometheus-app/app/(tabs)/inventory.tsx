@@ -149,32 +149,32 @@ export default function InventoryScreen() {
     }, [sortBy])
   );
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     fireAndForget(fetchInventory(true), message => setLoadError(message), '재고 새로고침 실패');
-  };
+  }, [fetchInventory]);
 
-  const onLoadMore = () => {
+  const onLoadMore = useCallback(() => {
     if (!hasMore || loading || loadingMore || refreshing) return;
     setLoadingMore(true);
     fireAndForget(fetchInventory(false), message => setLoadError(message), '재고 추가 로드 실패');
-  };
+  }, [fetchInventory, hasMore, loading, loadingMore, refreshing]);
 
-  const openEditModal = (item: InventoryItem) => {
+  const openEditModal = useCallback((item: InventoryItem) => {
     setEditingItem(item);
     setEditName(item.name);
     setEditQuantity(String(item.quantity));
     setEditUnit(item.unit);
     setEditCategory(normalizeStorageCategory(item.category));
-  };
+  }, []);
 
-  const closeEditModal = () => {
+  const closeEditModal = useCallback(() => {
     setEditingItem(null);
     setEditName('');
     setEditQuantity('');
     setEditUnit('');
     setEditCategory('미분류');
-  };
+  }, []);
 
   const saveEdit = async () => {
     if (!editingItem) return;
@@ -258,11 +258,11 @@ export default function InventoryScreen() {
     setUndoItem(null);
   };
 
-  const deleteItem = (item: InventoryItem) => {
+  const deleteItem = useCallback((item: InventoryItem) => {
     confirmDeleteItem(item.name, () => {
       fireAndForget(performDelete(item), () => { }, '삭제 실패');
     });
-  };
+  }, [performDelete]);
 
   const today = new Date();
   const stats = items.reduce(
