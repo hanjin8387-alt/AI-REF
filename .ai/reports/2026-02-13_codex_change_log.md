@@ -455,7 +455,7 @@
   - Image load failure still falls back to the static recipe placeholder block.
 
 ## Commit P2-10: perf(ux): PS-005 add empty-state CTAs on key tabs
-- Commit: `(pending)`
+- Commit: `4e1e281`
 - Files:
   - `prometheus-app/app/(tabs)/index.tsx`
   - `prometheus-app/app/(tabs)/inventory.tsx`
@@ -470,3 +470,16 @@
 - Notes:
   - Added direct empty-state actions for home/favorites, inventory, and shopping tabs.
   - First app test run failed because `useRouter` mock was missing in `inventory-screen` test; added minimal mock and reran successfully.
+
+## Commit P2-11: perf(ux): PS-006 add feed transition animation
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/app/(tabs)/index.tsx`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 28 tests`)
+  - Perf smoke: `PASS` (`/health avg=85.1ms p95=99.8ms`, `/inventory avg=85.2ms p95=92.2ms`)
+- Notes:
+  - Added a lightweight fade+slide transition layer for home feed content to smooth mode/screen updates.

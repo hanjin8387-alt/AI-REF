@@ -1,5 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Alert,
   Modal,
   ScrollView,
@@ -38,6 +39,7 @@ function getDaysUntil(expiryDate?: string): number | null {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const transitionProgress = useRef(new Animated.Value(1)).current;
   const [feedMode, setFeedMode] = useState<FeedMode>('recommended');
   const [recipes, setRecipes] = useState<ApiRecipe[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +82,15 @@ export default function HomeScreen() {
 
     return () => clearInterval(timer);
   }, [feedMode, loading]);
+
+  useEffect(() => {
+    transitionProgress.setValue(0.9);
+    Animated.timing(transitionProgress, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [feedMode, transitionProgress]);
 
   const setRecipeFavoriteLocally = useCallback((recipeId: string, isFavorite: boolean) => {
     setRecipes(prev => {
@@ -398,6 +409,22 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.cardContainer}>
+        <Animated.View
+          style={[
+            styles.transitionLayer,
+            {
+              opacity: transitionProgress,
+              transform: [
+                {
+                  translateY: transitionProgress.interpolate({
+                    inputRange: [0.9, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
         {loading ? (
           <View style={styles.loadingWrap}>
             <SkeletonCard count={3} height={156} />
@@ -439,6 +466,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         )}
+        </Animated.View>
       </View>
 
       <View style={styles.footerActions}>
@@ -602,6 +630,7 @@ const styles = StyleSheet.create({
   feedButtonText: { color: '#22352B', fontWeight: '700' },
   feedButtonTextActive: { color: Colors.white },
   cardContainer: { flex: 1, paddingHorizontal: 8 },
+  transitionLayer: { flex: 1 },
   loadingWrap: { paddingHorizontal: 16, paddingTop: 8 },
   progressStepText: { marginTop: 8, color: Colors.gray600, fontSize: 12, fontWeight: '600' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
