@@ -18,6 +18,7 @@ import Colors from '@/constants/Colors';
 import { InventoryItemCard } from '@/components/InventoryItemCard';
 import { InventoryItem, SortOption, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
+import { confirmDeleteItem } from '@/utils/confirmDelete';
 
 const PAGE_SIZE = 40;
 const STORAGE_GROUPS = ['냉장', '냉동', '상온', '미분류'] as const;
@@ -250,22 +251,9 @@ export default function InventoryScreen() {
   };
 
   const deleteItem = (item: InventoryItem) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`"${item.name}" 항목을 삭제할까요?`)) {
-        fireAndForget(performDelete(item), () => { }, '삭제 실패');
-      }
-    } else {
-      Alert.alert('항목 삭제', `"${item.name}" 항목을 삭제할까요?`, [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
-            fireAndForget(performDelete(item), () => { }, '삭제 실패');
-          },
-        },
-      ]);
-    }
+    confirmDeleteItem(item.name, () => {
+      fireAndForget(performDelete(item), () => { }, '삭제 실패');
+    });
   };
 
   const today = new Date();

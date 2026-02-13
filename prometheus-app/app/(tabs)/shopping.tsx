@@ -16,6 +16,7 @@ import { useFocusEffect } from 'expo-router';
 import Colors from '@/constants/Colors';
 import { ShoppingItem, ShoppingItemStatus, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
+import { confirmDeleteItem } from '@/utils/confirmDelete';
 
 const PAGE_SIZE = 30;
 
@@ -225,26 +226,20 @@ export default function ShoppingScreen() {
   };
 
   const deleteItem = (item: ShoppingItem) => {
-    Alert.alert('항목 삭제', `장보기 목록에서 "${item.name}" 항목을 삭제할까요?`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: () =>
-          fireAndForget(
-            (async () => {
-              const result = await api.deleteShoppingItem(item.id);
-              if (!result.data?.success) {
-                Alert.alert('삭제 실패', result.error || '항목을 삭제하지 못했어요.');
-                return;
-              }
-              await loadShopping(true);
-            })(),
-            message => Alert.alert('삭제 실패', message),
-            '장보기 삭제 실패'
-          ),
-      },
-    ]);
+    confirmDeleteItem(item.name, () => {
+      fireAndForget(
+        (async () => {
+          const result = await api.deleteShoppingItem(item.id);
+          if (!result.data?.success) {
+            Alert.alert('삭제 실패', result.error || '항목을 삭제하지 못했어요.');
+            return;
+          }
+          await loadShopping(true);
+        })(),
+        message => Alert.alert('삭제 실패', message),
+        '장보기 삭제 실패'
+      );
+    });
   };
 
   const renderItem = ({ item }: { item: ShoppingItem }) => {

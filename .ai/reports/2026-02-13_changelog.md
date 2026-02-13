@@ -196,3 +196,14 @@
   - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
 - Test result:
   - `1 passed`, exit code `0`.
+
+## B-11 ??fix(app): UX-005 unify delete confirmation dialogs
+- Code changes:
+  - Added shared delete-confirm utility: `prometheus-app/utils/confirmDelete.ts`.
+    - Unified confirm title/message/buttons for native (`Alert.alert`) and web (`confirm`) paths.
+  - Updated `prometheus-app/app/(tabs)/inventory.tsx` to use `confirmDeleteItem(...)` for item deletion confirmation.
+  - Updated `prometheus-app/app/(tabs)/shopping.tsx` to use `confirmDeleteItem(...)` for item deletion confirmation.
+- Test command:
+  - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
+- Test result:
+  - `1 passed`, exit code `0`.
