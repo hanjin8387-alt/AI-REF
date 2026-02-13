@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -45,6 +45,7 @@ export default function HomeScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expiringItems, setExpiringItems] = useState<InventoryItem[]>([]);
+  const [recipeProgressStep, setRecipeProgressStep] = useState('');
 
   const [isCooking, setIsCooking] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -57,6 +58,28 @@ export default function HomeScreen() {
     () => selectedRecipe?.ingredients.filter(ingredient => !ingredient.available) || [],
     [selectedRecipe]
   );
+
+  useEffect(() => {
+    if (!loading || feedMode !== 'recommended') {
+      setRecipeProgressStep('');
+      return;
+    }
+
+    const steps = [
+      '재료 정보를 정리하고 있어요...',
+      '레시피 후보를 만들고 있어요...',
+      '추천 우선순위를 계산하고 있어요...',
+    ];
+
+    let index = 0;
+    setRecipeProgressStep(steps[index]);
+    const timer = setInterval(() => {
+      index = (index + 1) % steps.length;
+      setRecipeProgressStep(steps[index]);
+    }, 1200);
+
+    return () => clearInterval(timer);
+  }, [feedMode, loading]);
 
   const setRecipeFavoriteLocally = useCallback((recipeId: string, isFavorite: boolean) => {
     setRecipes(prev => {
@@ -374,6 +397,7 @@ export default function HomeScreen() {
         {loading ? (
           <View style={styles.loadingWrap}>
             <SkeletonCard count={3} height={156} />
+            {recipeProgressStep ? <Text style={styles.progressStepText}>{recipeProgressStep}</Text> : null}
           </View>
         ) : recipes.length > 0 ? (
           <RecipeCardStack
@@ -558,6 +582,7 @@ const styles = StyleSheet.create({
   feedButtonTextActive: { color: Colors.white },
   cardContainer: { flex: 1, paddingHorizontal: 8 },
   loadingWrap: { paddingHorizontal: 16, paddingTop: 8 },
+  progressStepText: { marginTop: 8, color: Colors.gray600, fontSize: 12, fontWeight: '600' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   emptyTitle: { color: '#132018', fontSize: 18, fontWeight: '700', marginBottom: 8 },
   emptyText: { color: Colors.gray600, textAlign: 'center' },
@@ -601,5 +626,6 @@ const styles = StyleSheet.create({
   cookButton: { flex: 1, borderRadius: 10, backgroundColor: Colors.primary, alignItems: 'center', paddingVertical: 12 },
   cookButtonText: { color: Colors.white, fontWeight: '700' },
 });
+
 
 
