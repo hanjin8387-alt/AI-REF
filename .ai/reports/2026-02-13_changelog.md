@@ -28,3 +28,17 @@
   - `cd prometheus-api && python -m pytest tests/test_admin.py -v` (environment fallback: `py -m pytest tests/test_admin.py -v`)
 - Test result:
   - `3 passed`, exit code `0`.
+
+## A-2 — security(infra): SEC-002 run container as non-root user
+- Code changes:
+  - Updated `prometheus-api/Dockerfile`:
+    - Added non-root user creation (`appuser`) and ownership update for `/app`.
+    - Added `USER appuser` before runtime instruction.
+  - Added `prometheus-api/.dockerignore` with `.env`, `__pycache__/`, `.git`, `*.pyc`.
+- Test command:
+  - `docker build -t prometheus-api . && docker run --rm prometheus-api whoami`
+  - Environment execution used absolute binary path: `C:\Program Files\Docker\Docker\resources\bin\docker.exe`.
+- Test result:
+  - First run failed due `docker-credential-desktop` not in PATH.
+  - Minimal fix applied: Docker `resources\bin` appended to PATH for the session.
+  - Rerun succeeded and container user output was `appuser`.
