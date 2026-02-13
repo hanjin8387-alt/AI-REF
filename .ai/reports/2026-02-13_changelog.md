@@ -166,3 +166,15 @@
   - `cd prometheus-api && python -m pytest tests/test_services/test_inventory_service.py -v` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `4 passed`, exit code `0`.
+
+## B-9 — test(api): TE-004 add scans endpoint integration tests
+- Code changes:
+  - Expanded `prometheus-api/tests/test_scans.py`:
+    - Upload size limit (`413`) test.
+    - Successful upload and result retrieval flow test.
+    - Non-image upload rejection (`415`) test.
+    - Gemini failure path with FAILED status update (`502`) test.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_scans.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `4 passed`, exit code `0`.
