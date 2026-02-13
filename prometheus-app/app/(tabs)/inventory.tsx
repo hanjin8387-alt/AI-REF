@@ -208,11 +208,30 @@ export default function InventoryScreen() {
     closeEditModal();
   };
 
+  const rollbackDeletedItem = useCallback((item: InventoryItem) => {
+    clearUndoTimer();
+    setUndoVisible(false);
+    setUndoItem(null);
+    setItems(prev => {
+      const merged = [...prev, item];
+      return dedupeById(merged).sort((a, b) => compareInventory(a, b, sortBy));
+    });
+  }, [sortBy]);
+
   const performDelete = async (item: InventoryItem) => {
+    setItems(prev =>
+      prev.filter(current => {
+        if (current.id && item.id) return current.id !== item.id;
+        return !(current.name === item.name && current.created_at === item.created_at);
+      })
+    );
+    showUndo(item);
+
     try {
       const result = await api.deleteInventoryItem(item.id);
       if (!result.data?.success) {
         const msg = result.error || '항목을 삭제하지 못했어요.';
+        rollbackDeletedItem(item);
         if (Platform.OS === 'web') {
           window.alert(`삭제 실패: ${msg}`);
         } else {
@@ -220,16 +239,9 @@ export default function InventoryScreen() {
         }
         return;
       }
-
-      setItems(prev =>
-        prev.filter(current => {
-          if (current.id && item.id) return current.id !== item.id;
-          return !(current.name === item.name && current.created_at === item.created_at);
-        })
-      );
-      showUndo(item);
     } catch (error) {
       const msg = error instanceof Error ? error.message : '항목을 삭제하지 못했어요.';
+      rollbackDeletedItem(item);
       if (Platform.OS === 'web') {
         window.alert(`삭제 실패: ${msg}`);
       } else {

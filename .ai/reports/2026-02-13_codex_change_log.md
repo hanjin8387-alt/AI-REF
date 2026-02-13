@@ -186,7 +186,7 @@
   - Perf smoke: `PASS` (`cache_control=private, max-age=15, stale-while-revalidate=30`, `status=200`)
 
 ## Commit B-7: perf(ux): NC-004 prefetch adjacent tab data
-- Commit: `pending`
+- Commit: `9edb847`
 - Files:
   - `prometheus-app/services/api.ts`
   - `prometheus-app/app/(tabs)/index.tsx`
@@ -200,3 +200,14 @@
   - Tests: `PASS` (`4 suites, 20 tests`)
   - Benchmark: `N/A`
   - Notes: First run failed due missing test mock methods; added minimal mock stubs and reran successfully.
+
+## Commit B-8: perf(ux): PS-002 optimistic UI for inventory delete
+- Commit: `pending`
+- Files:
+  - `prometheus-app/app/(tabs)/inventory.tsx`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a CLI benchmark for this UX task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 20 tests`)
+  - Benchmark: `N/A`
