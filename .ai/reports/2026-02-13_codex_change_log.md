@@ -341,3 +341,22 @@
 - Notes:
   - Runtime layer bloat came from `COPY --from=builder /wheels /wheels` persistence.
   - Switched to BuildKit `RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels` to avoid embedding wheel artifacts in final image.
+
+## Commit P2-4: perf(build): BS-003 remove redundant direct dependency
+- Commit: `(pending)`
+- Files:
+  - `prometheus-api/requirements.txt`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark build: `$env:PATH='C:\\Program Files\\Docker\\Docker\\resources\\bin;'+$env:PATH; docker build --no-cache -t prometheus-api:perf-ms ./prometheus-api`
+  - Benchmark size: `docker images prometheus-api:perf-ms --format "{{.Repository}}:{{.Tag}} {{.Size}}"`
+- Result:
+  - Tests: `PASS` (`46 passed`)
+  - Build: `PASS`
+  - Benchmark: `PASS` (`prometheus-api:perf-ms 552MB`)
+- Metrics:
+  - Before: `prometheus-api:perf-ms 552MB`
+  - After: `prometheus-api:perf-ms 552MB`
+  - Delta: `0MB`
+- Notes:
+  - Removed direct `python-dotenv` from `requirements.txt`; it is already pulled transitively by `pydantic-settings`.
