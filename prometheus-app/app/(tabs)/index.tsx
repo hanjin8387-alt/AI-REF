@@ -14,6 +14,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import Colors from '@/constants/Colors';
 import { RecipeCardStack } from '@/components/RecipeCardStack';
+import { SkeletonCard } from '@/components/SkeletonCard';
 import { ApiRecipe, InventoryItem, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
 
@@ -304,8 +305,8 @@ export default function HomeScreen() {
 
       <View style={styles.cardContainer}>
         {loading ? (
-          <View style={styles.centered}>
-            <Text style={styles.emptyText}>레시피를 불러오는 중...</Text>
+          <View style={styles.loadingWrap}>
+            <SkeletonCard count={3} height={156} />
           </View>
         ) : recipes.length > 0 ? (
           <RecipeCardStack
@@ -506,6 +507,7 @@ const styles = StyleSheet.create({
   feedButtonText: { color: '#22352B', fontWeight: '700' },
   feedButtonTextActive: { color: Colors.white },
   cardContainer: { flex: 1, paddingHorizontal: 8 },
+  loadingWrap: { paddingHorizontal: 16, paddingTop: 8 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   emptyTitle: { color: '#132018', fontSize: 18, fontWeight: '700', marginBottom: 8 },
   emptyText: { color: Colors.gray600, textAlign: 'center' },

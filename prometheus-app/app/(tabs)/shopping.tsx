@@ -14,6 +14,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 
 import Colors from '@/constants/Colors';
+import { SkeletonCard } from '@/components/SkeletonCard';
 import { ShoppingItem, ShoppingItemStatus, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
 import { confirmDeleteItem } from '@/utils/confirmDelete';
@@ -413,8 +414,8 @@ export default function ShoppingScreen() {
       </View>
 
       {loading ? (
-          <View style={styles.centered}>
-          <Text style={styles.infoText}>장보기 목록을 불러오는 중...</Text>
+        <View style={styles.loadingWrap}>
+          <SkeletonCard count={5} />
         </View>
       ) : items.length === 0 ? (
         <View style={styles.centered}>
@@ -583,6 +584,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   suggestionApplyText: { color: Colors.white, fontWeight: '700', fontSize: 12 },
+  loadingWrap: { paddingHorizontal: 24, paddingTop: 8 },
   listContent: { paddingHorizontal: 24, paddingBottom: 100, gap: 10 },
   card: {
     backgroundColor: Colors.white,

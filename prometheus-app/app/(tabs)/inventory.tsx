@@ -16,6 +16,7 @@ import { useFocusEffect } from 'expo-router';
 
 import Colors from '@/constants/Colors';
 import { InventoryItemCard } from '@/components/InventoryItemCard';
+import { SkeletonCard } from '@/components/SkeletonCard';
 import { InventoryItem, SortOption, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
 import { confirmDeleteItem } from '@/utils/confirmDelete';
@@ -415,9 +416,7 @@ export default function InventoryScreen() {
 
       {loading ? (
         <View style={styles.loadingWrap}>
-          {[0, 1, 2, 3].map(index => (
-            <View key={index} style={styles.skeletonRow} />
-          ))}
+          <SkeletonCard count={5} />
         </View>
       ) : sections.length > 0 ? (
         <SectionList
@@ -663,13 +662,6 @@ const styles = StyleSheet.create({
   },
 
   loadingWrap: { paddingHorizontal: 24, gap: 12 },
-  skeletonRow: {
-    height: 84,
-    borderRadius: 16,
-    backgroundColor: '#E8EFEC',
-    borderWidth: 1,
-    borderColor: '#DDE6E1',
-  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   messageTitle: { color: '#132018', fontSize: 20, fontWeight: '700', marginBottom: 8 },
   messageText: { color: Colors.gray600, textAlign: 'center' },
