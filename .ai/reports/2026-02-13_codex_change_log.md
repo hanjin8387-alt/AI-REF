@@ -485,7 +485,7 @@
   - Added a lightweight fade+slide transition layer for home feed content to smooth mode/screen updates.
 
 ## Commit P2-12: perf(reliability): PRL-003 enforce offline cache TTL
-- Commit: `(pending)`
+- Commit: `24282f1`
 - Files:
   - `prometheus-app/services/http-client.ts`
   - `prometheus-app/__tests__/http-client.test.ts`
@@ -498,3 +498,16 @@
 - Notes:
   - Added a 24-hour TTL gate for offline fallback data in `http-client`.
   - Added regression test that stale offline inventory cache is ignored.
+
+## Commit P2-13: docs(perf): PRL-004 document performance budget
+- Commit: `(pending)`
+- Files:
+  - `.ai/reports/2026-02-13_perf_budget.md`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 29 tests`)
+  - Perf smoke: `PASS` (`/health avg=82.9ms p95=86.7ms`, `/inventory avg=86.2ms p95=98.2ms`)
+- Notes:
+  - Added explicit budget thresholds and latest measured snapshot to a dedicated performance budget document.
