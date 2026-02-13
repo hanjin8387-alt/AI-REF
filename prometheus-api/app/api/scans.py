@@ -23,68 +23,18 @@ from ..schemas.schemas import (
     ScanUploadResponse,
 )
 from ..services.gemini_service import GeminiService, get_gemini_service
+from ..services.storage_utils import STORAGE_CATEGORIES, guess_storage_from_name, normalize_storage_category
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 MAX_SCAN_FILENAME_LENGTH = 255
 DEFAULT_SCAN_FILENAME = "scan-upload"
-STORAGE_CATEGORIES = ("냉장", "냉동", "상온")
 
 router = APIRouter(
     prefix="/scans",
     tags=["scans"],
     dependencies=[Depends(require_app_token)],
 )
-
-
-def _normalize_storage_category(value: str | None) -> str | None:
-    if not value:
-        return None
-
-    normalized = str(value).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
-    if not normalized:
-        return None
-
-    if any(token in normalized for token in ("냉동", "freezer", "frozen", "freeze")):
-        return "냉동"
-    if any(token in normalized for token in ("냉장", "fridge", "refriger", "chill", "cold")):
-        return "냉장"
-    if any(token in normalized for token in ("상온", "실온", "ambient", "pantry", "roomtemperature")):
-        return "상온"
-    return None
-
-
-def _guess_storage_category_from_name(name: str) -> str:
-    lowered = (name or "").lower()
-
-    frozen_keywords = ["냉동", "ice", "frozen", "만두", "피자", "아이스", "새우", "튀김"]
-    chilled_keywords = [
-        "우유",
-        "치즈",
-        "요거트",
-        "계란",
-        "두부",
-        "고기",
-        "생선",
-        "버터",
-        "크림",
-        "채소",
-        "과일",
-        "meat",
-        "fish",
-        "milk",
-        "egg",
-        "cheese",
-        "yogurt",
-        "tofu",
-    ]
-
-    if any(keyword in lowered for keyword in frozen_keywords):
-        return "냉동"
-    if any(keyword in lowered for keyword in chilled_keywords):
-        return "냉장"
-    return "상온"
-
 
 def _normalize_unit(value: str | None) -> str:
     unit = (value or "").strip()
@@ -98,9 +48,9 @@ def _normalize_unit(value: str | None) -> str:
 def _enrich_scan_items_with_storage(items: list[FoodItem]) -> list[FoodItem]:
     enriched: list[FoodItem] = []
     for item in items:
-        normalized = _normalize_storage_category(item.category)
+        normalized = normalize_storage_category(item.category)
         if normalized is None:
-            normalized = _guess_storage_category_from_name(item.name)
+            normalized = guess_storage_from_name(item.name)
         if normalized not in STORAGE_CATEGORIES:
             normalized = "상온"
         enriched.append(

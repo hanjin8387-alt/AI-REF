@@ -1,0 +1,311 @@
+﻿import logging
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from supabase import Client
+
+from ..core.database import get_db
+from ..core.security import get_device_id, require_app_token
+from ..schemas.schemas import (
+    BulkInventoryRequest,
+    BulkInventoryResponse,
+    InventoryDeleteResponse,
+    InventoryItem,
+    InventoryListResponse,
+    InventoryRestoreRequest,
+    InventoryUpdateRequest,
+    NotificationType,
+)
+from ..services.inventory_service import bulk_upsert_inventory, log_inventory_change
+from ..services.notifications import create_notification
+from ..services.storage_utils import normalize_storage_category
+
+logger = logging.getLogger(__name__)
+router = APIRouter(
+    prefix="/inventory",
+    tags=["inventory"],
+    dependencies=[Depends(require_app_token)],
+)
+
+
+
+
+@router.get("", response_model=InventoryListResponse)
+async def get_inventory(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    sort_by: str = Query("expiry_date", description="Sort key"),
+    limit: int = Query(30, ge=1, le=200, description="Rows per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    query = db.table("inventory").select("*", count="exact").eq("device_id", device_id)
+
+    if category:
+        query = query.eq("category", category)
+
+    if sort_by == "expiry_date":
+        query = query.order("expiry_date", desc=False, nullsfirst=False)
+    elif sort_by == "name":
+        query = query.order("name", desc=False)
+    elif sort_by == "created_at":
+        query = query.order("created_at", desc=True)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sort_by는 expiry_date, name, created_at 중 하나여야 합니다.",
+        )
+
+    result = query.range(offset, offset + limit - 1).execute()
+    rows = result.data or []
+    total_count = int(result.count or 0)
+    if total_count == 0 and rows:
+        total_count = len(rows)
+
+    items = [InventoryItem(**item) for item in rows]
+    has_more = offset + len(items) < total_count
+    return InventoryListResponse(
+        items=items,
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+    )
+
+
+@router.post("/bulk", response_model=BulkInventoryResponse)
+async def bulk_add_inventory(
+    request: BulkInventoryRequest,
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    if not request.items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="최소 1개 이상의 항목이 필요합니다.",
+        )
+
+    raw_items = [
+        {
+            "name": item.name,
+            "quantity": item.quantity,
+            "unit": item.unit,
+            "expiry_date": item.expiry_date,
+            "category": normalize_storage_category(item.category),
+        }
+        for item in request.items
+    ]
+
+    added_count, updated_count, items = bulk_upsert_inventory(db, device_id, raw_items)
+
+    if added_count == 0 and updated_count == 0:
+        return BulkInventoryResponse(success=True, added_count=0, updated_count=0, items=[])
+
+    create_notification(
+        db=db,
+        device_id=device_id,
+        notification_type=NotificationType.INVENTORY,
+        title="재고가 업데이트되었어요",
+        message=f"{added_count}개 추가, {updated_count}개 업데이트했어요.",
+        metadata={"added_count": added_count, "updated_count": updated_count},
+    )
+
+    return BulkInventoryResponse(
+        success=True,
+        added_count=added_count,
+        updated_count=updated_count,
+        items=items,
+    )
+
+
+@router.put("/{item_id}", response_model=InventoryItem)
+async def update_inventory_item(
+    item_id: str,
+    request: InventoryUpdateRequest,
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    existing = (
+        db.table("inventory")
+        .select("*")
+        .eq("id", item_id)
+        .eq("device_id", device_id)
+        .single()
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="인벤토리 항목을 찾을 수 없습니다.")
+
+    updates: dict[str, object] = {}
+    if request.name is not None:
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이름은 비워둘 수 없습니다.")
+        updates["name"] = name
+    if request.quantity is not None:
+        if request.quantity < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수량은 0 이상이어야 합니다.")
+        updates["quantity"] = float(request.quantity)
+    if request.unit is not None:
+        unit = request.unit.strip()
+        updates["unit"] = unit or "개"
+    if request.expiry_date is not None:
+        updates["expiry_date"] = request.expiry_date.date().isoformat()
+    if request.category is not None:
+        updates["category"] = normalize_storage_category(request.category)
+
+    if not updates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="수정할 필드가 없습니다.")
+
+    try:
+        updated = (
+            db.table("inventory")
+            .update(updates)
+            .eq("id", item_id)
+            .eq("device_id", device_id)
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("inventory update failed item_id=%s device_id=%s", item_id, device_id)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="항목 수정에 실패했습니다.") from exc
+
+    if not updated.data:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 수정에 실패했습니다.")
+
+    result = InventoryItem(**updated.data[0])
+    old_qty = float(existing.data.get("quantity", 0))
+    new_qty = float(result.quantity)
+    if old_qty != new_qty:
+        log_inventory_change(
+            db, device_id, result.name, "update",
+            quantity_change=round(new_qty - old_qty, 2),
+            metadata={"item_id": item_id, "old_quantity": old_qty},
+        )
+    return result
+
+
+@router.delete("/{item_id}", response_model=InventoryDeleteResponse)
+async def delete_inventory_item(
+    item_id: str,
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    existing_result = (
+        db.table("inventory")
+        .select("*")
+        .eq("id", item_id)
+        .eq("device_id", device_id)
+        .limit(1)
+        .execute()
+    )
+    existing_rows = existing_result.data or []
+    if not existing_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="인벤토리 항목을 찾을 수 없습니다.")
+
+    try:
+        db.table("inventory").delete().eq("id", item_id).eq("device_id", device_id).execute()
+    except Exception as exc:
+        logger.exception("inventory delete failed item_id=%s device_id=%s", item_id, device_id)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="항목 삭제에 실패했습니다.") from exc
+
+    deleted_item = InventoryItem(**existing_rows[0])
+
+    log_inventory_change(
+        db, device_id, deleted_item.name, "delete",
+        quantity_change=-deleted_item.quantity,
+        metadata={"item_id": item_id},
+    )
+
+    create_notification(
+        db=db,
+        device_id=device_id,
+        notification_type=NotificationType.INVENTORY,
+        title="재고 항목이 삭제되었어요",
+        message=f"{deleted_item.name} 항목을 재고에서 삭제했어요.",
+        metadata={"item_id": item_id, "name": deleted_item.name},
+    )
+
+    return InventoryDeleteResponse(
+        success=True,
+        message="재고 항목을 삭제했어요.",
+        deleted_item=deleted_item,
+    )
+
+
+@router.post("/restore", response_model=InventoryItem)
+async def restore_inventory_item(
+    request: InventoryRestoreRequest,
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이름은 비워둘 수 없습니다.")
+
+    existing = (
+        db.table("inventory")
+        .select("*")
+        .eq("device_id", device_id)
+        .eq("name", name)
+        .limit(1)
+        .execute()
+    )
+
+    expiry_date = request.expiry_date.date().isoformat() if request.expiry_date else None
+    normalized_category = normalize_storage_category(request.category)
+    if existing.data:
+        row = existing.data[0]
+        updated = (
+            db.table("inventory")
+            .update(
+                {
+                    "quantity": float(row.get("quantity", 0)) + max(float(request.quantity), 0.0),
+                    "unit": request.unit.strip() or row.get("unit") or "개",
+                    "expiry_date": expiry_date or row.get("expiry_date"),
+                    "category": normalized_category if request.category is not None else row.get("category"),
+                }
+            )
+            .eq("id", row["id"])
+            .eq("device_id", device_id)
+            .execute()
+        )
+        if not updated.data:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 복구에 실패했습니다.")
+        restored = InventoryItem(**updated.data[0])
+    else:
+        inserted = (
+            db.table("inventory")
+            .insert(
+                {
+                    "device_id": device_id,
+                    "name": name,
+                    "quantity": max(float(request.quantity), 0.0),
+                    "unit": request.unit.strip() or "개",
+                    "expiry_date": expiry_date,
+                    "category": normalized_category,
+                }
+            )
+            .execute()
+        )
+        if not inserted.data:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="항목 복구에 실패했습니다.")
+        restored = InventoryItem(**inserted.data[0])
+
+    log_inventory_change(
+        db, device_id, restored.name, "restore",
+        quantity_change=float(request.quantity),
+    )
+
+    create_notification(
+        db=db,
+        device_id=device_id,
+        notification_type=NotificationType.INVENTORY,
+        title="재고 항목을 복구했어요",
+        message=f"{restored.name} 항목을 복구했어요.",
+        metadata={"item_id": restored.id, "name": restored.name},
+    )
+
+    return restored
+
+
+

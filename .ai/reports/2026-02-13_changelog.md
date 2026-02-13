@@ -79,3 +79,21 @@
   - `cd prometheus-api && python -m pytest tests/test_scans.py -v -k "test_upload_size"` (environment fallback: `py -m pytest ...`)
 - Test result:
   - `1 passed`, exit code `0`.
+
+## B-1 — refactor(api): CR-003 extract shared storage category utilities
+- Code changes:
+  - Added `prometheus-api/app/services/storage_utils.py`:
+    - `normalize_storage_category()`
+    - `guess_storage_from_name()`
+    - `STORAGE_CATEGORIES`
+  - Updated `prometheus-api/app/api/scans.py` to use shared utility functions.
+  - Updated `prometheus-api/app/api/inventory.py` to use shared `normalize_storage_category()`.
+  - Removed duplicated storage normalization/guessing logic from API modules.
+- Test command:
+  - `cd prometheus-api && python -m pytest tests/test_services/test_storage_utils.py -v` (environment fallback: `py -m pytest ...`)
+- Test result:
+  - `3 passed`, exit code `0`.
+
+## B-2 — SEC-007 .dockerignore generation
+- Status:
+  - Skipped by plan rule because `.dockerignore` was already created and committed in `A-2`.
