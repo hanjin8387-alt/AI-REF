@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { offlineCache } from './offline-cache';
 import { logHttpPerf } from './perf-logger';
+import { parseJsonWithWorker } from '../utils/json-worker';
 
 const APP_TOKEN =
   process.env.EXPO_PUBLIC_APP_TOKEN ||
@@ -261,8 +262,8 @@ export class HttpClient {
           let detail = `HTTP ${response.status}`;
 
           if (contentType.includes('application/json')) {
-            const errorData = await response.json().catch(() => ({}));
-            detail = errorData.detail || errorData.message || detail;
+            const errorData = await this.parseJsonBody<Record<string, unknown>>(response).catch(() => ({}));
+            detail = String(errorData.detail || errorData.message || detail);
           } else {
             const errorText = await response.text().catch(() => '');
             if (errorText) detail = errorText;
@@ -277,7 +278,7 @@ export class HttpClient {
           return { error: this.localizeServerError(detail) };
         }
 
-        const data = (await response.json()) as T;
+        const data = await this.parseJsonBody<T>(response);
         if (method === 'GET' && cacheTtlMs > 0) {
           this.cache.set(cacheKey, {
             expiresAt: Date.now() + cacheTtlMs,
@@ -616,6 +617,14 @@ export class HttpClient {
     }
 
     return normalized;
+  }
+
+  private async parseJsonBody<T>(response: Response): Promise<T> {
+    if (Platform.OS === 'web' && typeof response.text === 'function') {
+      const raw = await response.text();
+      return parseJsonWithWorker<T>(raw);
+    }
+    return (await response.json()) as T;
   }
 }
 

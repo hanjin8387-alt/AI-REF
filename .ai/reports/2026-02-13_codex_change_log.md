@@ -404,7 +404,7 @@
   - Existing PNG assets remain as compatibility fallback in manifest/html.
 
 ## Commit P2-7: perf(network): NC-005 add offline delta sync
-- Commit: `(pending)`
+- Commit: `bbe6660`
 - Files:
   - `prometheus-api/app/api/inventory.py`
   - `prometheus-api/app/api/recipes.py`
@@ -423,3 +423,19 @@
   - Added `updated_since` delta filters to inventory/favorites/shopping read endpoints.
   - Added app-side delta merge flow and retry hook-up (`retryPendingSync` -> `syncOfflineDelta`).
   - First perf-smoke invocation failed due PowerShell path quoting; rerun command passed with the same inputs.
+
+## Commit P2-8: perf(app): FR-005 offload large JSON parsing with worker fallback
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/services/http-client.ts`
+  - `prometheus-app/utils/json-worker.ts`
+  - `prometheus-app/__tests__/json-worker.test.ts`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 28 tests`)
+  - Perf smoke: `PASS` (`/health avg=84.0ms p95=95.0ms`, `/inventory avg=83.7ms p95=87.0ms`)
+- Notes:
+  - Web GET JSON bodies now parse through worker path for large payloads, with automatic fallback to direct parse on worker errors/timeouts.
+  - Added dedicated worker parser unit tests for normal, worker, and fallback paths.
