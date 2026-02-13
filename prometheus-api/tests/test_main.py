@@ -25,15 +25,3 @@ def test_request_id_header_uses_incoming_value(client) -> None:
 
     assert response.status_code == 200
     assert response.headers.get("X-Request-ID") == "req-12345"
-
-
-def test_process_time_headers_are_present(client) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    process_time = response.headers.get("X-Process-Time")
-    response_time = response.headers.get("X-Response-Time")
-    assert process_time is not None
-    assert response_time is not None
-    assert float(process_time) >= 0
-    assert float(response_time) >= 0

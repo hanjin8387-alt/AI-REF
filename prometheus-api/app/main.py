@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 import logging
-import time
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request, status
@@ -94,7 +93,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    started = time.perf_counter()
     request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
     request.state.request_id = request_id
 
@@ -109,21 +107,7 @@ async def request_id_middleware(request: Request, call_next):
         )
         raise
 
-    elapsed = time.perf_counter() - started
-    process_time = f"{elapsed:.6f}"
-
-    logger.info(
-        "perf.request method=%s path=%s status=%s process_time=%s request_id=%s",
-        request.method,
-        request.url.path,
-        response.status_code,
-        process_time,
-        request_id,
-    )
-
     response.headers[REQUEST_ID_HEADER] = request_id
-    response.headers["X-Process-Time"] = process_time
-    response.headers["X-Response-Time"] = process_time
     return response
 
 
