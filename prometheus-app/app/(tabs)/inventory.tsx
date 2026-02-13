@@ -410,6 +410,11 @@ export default function InventoryScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           showsVerticalScrollIndicator={false}
           stickySectionHeadersEnabled={false}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={9}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews
           onEndReachedThreshold={0.3}
           onEndReached={onLoadMore}
           ListFooterComponent={

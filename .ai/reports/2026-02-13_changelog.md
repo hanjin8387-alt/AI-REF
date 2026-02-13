@@ -246,3 +246,15 @@
   - First fallback run failed: `tests/test_scans.py::test_upload_size_limit_exceeded_returns_413` expected old Korean message.
   - Minimal fix applied: updated assertion to English detail.
   - Rerun passed: `32 passed`, exit code `0`.
+
+## B-14 ??perf(app): PR-005 optimize FlatList rendering performance
+- Code changes:
+  - Updated `prometheus-app/app/(tabs)/history.tsx`:
+    - Added `getItemLayout` estimate for history cards.
+    - Added virtualization props: `initialNumToRender`, `maxToRenderPerBatch`, `windowSize`, `updateCellsBatchingPeriod`, `removeClippedSubviews`.
+  - Updated `prometheus-app/app/(tabs)/inventory.tsx`:
+    - Added list virtualization props for `SectionList`: `initialNumToRender`, `maxToRenderPerBatch`, `windowSize`, `updateCellsBatchingPeriod`, `removeClippedSubviews`.
+- Test command:
+  - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
+- Test result:
+  - `1 passed`, exit code `0`.

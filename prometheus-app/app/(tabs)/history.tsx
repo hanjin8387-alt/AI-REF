@@ -18,6 +18,7 @@ import { CookingHistoryItem, PriceHistoryItem, StatsSummaryResponse, api } from 
 import { fireAndForget } from '@/utils/async';
 
 const PAGE_SIZE = 20;
+const HISTORY_ITEM_HEIGHT_ESTIMATE = 140;
 
 type StatsPeriod = 'week' | 'month' | 'all';
 
@@ -223,6 +224,16 @@ export default function HistoryScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+          getItemLayout={(_, index) => ({
+            length: HISTORY_ITEM_HEIGHT_ESTIMATE,
+            offset: HISTORY_ITEM_HEIGHT_ESTIMATE * index,
+            index,
+          })}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={9}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews
           onEndReachedThreshold={0.3}
           onEndReached={onLoadMore}
           renderItem={({ item }) => (
