@@ -218,13 +218,65 @@ class ApiClient extends HttpClient {
   }
 
   async getRecommendations(limit = 5, forceRefresh = false) {
-    return this.request<{ recipes: ApiRecipe[]; total_count: number }>(
-      `/recipes/recommendations?limit=${limit}&force_refresh=${forceRefresh ? 'true' : 'false'}`,
+    const fallback = () =>
+      this.request<{ recipes: ApiRecipe[]; total_count: number }>(
+        `/recipes/recommendations?limit=${limit}&force_refresh=${forceRefresh ? 'true' : 'false'}`,
+        {
+          cacheTtlMs: forceRefresh ? 0 : 10000,
+          timeoutMs: RECOMMENDATIONS_TIMEOUT_MS,
+        }
+      );
+
+    const createJob = await this.request<{ job_id: string; status: string }>(
+      `/recipes/recommendations/jobs?limit=${limit}&force_refresh=${forceRefresh ? 'true' : 'false'}`,
       {
-        cacheTtlMs: forceRefresh ? 0 : 10000,
-        timeoutMs: RECOMMENDATIONS_TIMEOUT_MS,
+        method: 'POST',
+        timeoutMs: 10000,
+        skipOfflineQueue: true,
       }
     );
+
+    if (!createJob.data?.job_id) {
+      return fallback();
+    }
+
+    const jobId = createJob.data.job_id;
+    const maxPolls = 20;
+    for (let attempt = 0; attempt < maxPolls; attempt += 1) {
+      const statusResult = await this.request<{
+        job_id: string;
+        status: 'pending' | 'processing' | 'completed' | 'failed';
+        recipes?: ApiRecipe[];
+        total_count?: number;
+        error?: string;
+      }>(`/recipes/recommendations/jobs/${jobId}`, {
+        cacheTtlMs: 0,
+        timeoutMs: 10000,
+        skipOfflineQueue: true,
+      });
+
+      if (!statusResult.data) {
+        return { error: statusResult.error || '레시피 추천 상태를 확인하지 못했어요.' };
+      }
+
+      if (statusResult.data.status === 'completed') {
+        const recipes = statusResult.data.recipes || [];
+        return {
+          data: {
+            recipes,
+            total_count: statusResult.data.total_count ?? recipes.length,
+          },
+        };
+      }
+
+      if (statusResult.data.status === 'failed') {
+        return { error: statusResult.data.error || '레시피 추천 생성에 실패했어요.' };
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    return { error: '레시피 추천 생성이 지연되고 있어요. 잠시 후 다시 시도해 주세요.' };
   }
 
   async getRecipe(recipeId: string) {

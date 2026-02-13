@@ -296,7 +296,7 @@
   - Notes: First run failed due Babel cache setup order; fixed with minimal config change and reran successfully.
 
 ## Commit P2-1: perf(api): BL-003 paginate admin expiry batch queries
-- Commit: `pending`
+- Commit: `2acaab7`
 - Files:
   - `prometheus-api/app/api/admin.py`
   - `prometheus-api/tests/test_admin.py`
@@ -306,3 +306,18 @@
 - Result:
   - Tests: `PASS` (`44 passed`)
   - Perf smoke: `PASS` (`/health avg=81.4ms p95=84.0ms`, `/inventory avg=83.5ms p95=87.7ms`)
+
+## Commit P2-2: perf(api): BL-005 add async recipe recommendation polling
+- Commit: `pending`
+- Files:
+  - `prometheus-api/app/api/recipes.py`
+  - `prometheus-api/app/schemas/schemas.py`
+  - `prometheus-api/tests/test_recipes_async.py`
+  - `prometheus-app/services/api.ts`
+- Commands:
+  - Test (api): `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `C:\Program Files\Git\bin\bash.exe -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`api: 46 passed / app: 4 suites, 21 tests`)
+  - Perf smoke: `PASS` (`/health avg=91.8ms p95=171.9ms`, `/inventory avg=87.0ms p95=107.4ms`)

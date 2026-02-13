@@ -1,5 +1,9 @@
 ﻿from datetime import datetime
+import asyncio
 import logging
+from datetime import timedelta, timezone
+from threading import Lock
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from slowapi import Limiter
@@ -23,6 +27,8 @@ from ..schemas.schemas import (
     FavoriteRecipeRequest,
     FavoriteToggleResponse,
     NotificationType,
+    RecommendationJobCreateResponse,
+    RecommendationJobStatusResponse,
     Recipe,
     RecipeListResponse,
 )
@@ -42,6 +48,9 @@ from ..services.recipe_helpers import (
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
+RECOMMENDATION_JOB_TTL_SECONDS = 300
+_recommendation_jobs_lock = Lock()
+_recommendation_jobs: dict[str, dict] = {}
 
 router = APIRouter(
     prefix="/recipes",
@@ -123,17 +132,23 @@ def _find_best_inventory_match(inventory_rows: list[dict], ingredient_name: str)
     return matched[0]
 
 
-@router.get("/recommendations", response_model=RecipeListResponse)
-@limiter.limit("20/minute")
-async def get_recommendations(
-    request: Request,
-    limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
-    force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
-    device_id: str = Depends(get_device_id),
-    db: Client = Depends(get_db),
-    gemini: GeminiService = Depends(get_gemini_service),
-    recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
-):
+def _prune_recommendation_jobs_locked(now: datetime) -> None:
+    stale_before = now - timedelta(seconds=RECOMMENDATION_JOB_TTL_SECONDS)
+    for job_id in list(_recommendation_jobs.keys()):
+        updated_at = _recommendation_jobs[job_id].get("updated_at")
+        if isinstance(updated_at, datetime) and updated_at < stale_before:
+            del _recommendation_jobs[job_id]
+
+
+async def _build_recommendation_response(
+    *,
+    limit: int,
+    force_refresh: bool,
+    device_id: str,
+    db: Client,
+    gemini: GeminiService,
+    recipe_cache: RecipeCacheProtocol,
+) -> RecipeListResponse:
     inventory_result = db.table("inventory").select(INVENTORY_SELECT_COLUMNS).eq("device_id", device_id).execute()
     inventory_rows = inventory_result.data or []
     if not inventory_rows:
@@ -173,6 +188,118 @@ async def get_recommendations(
 
     recipe_cache.set_many(device_id, fingerprint, recipes, get_settings().recipe_cache_ttl_minutes)
     return RecipeListResponse(recipes=recipes, total_count=len(recipes))
+
+
+@router.get("/recommendations", response_model=RecipeListResponse)
+@limiter.limit("20/minute")
+async def get_recommendations(
+    request: Request,
+    limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
+    force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+    gemini: GeminiService = Depends(get_gemini_service),
+    recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
+):
+    return await _build_recommendation_response(
+        limit=limit,
+        force_refresh=force_refresh,
+        device_id=device_id,
+        db=db,
+        gemini=gemini,
+        recipe_cache=recipe_cache,
+    )
+
+
+@router.post("/recommendations/jobs", response_model=RecommendationJobCreateResponse)
+@limiter.limit("20/minute")
+async def create_recommendation_job(
+    request: Request,
+    limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
+    force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+    gemini: GeminiService = Depends(get_gemini_service),
+    recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
+):
+    now = datetime.now(timezone.utc)
+    job_id = str(uuid4())
+    with _recommendation_jobs_lock:
+        _prune_recommendation_jobs_locked(now)
+        _recommendation_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "device_id": device_id,
+            "recipes": [],
+            "total_count": 0,
+            "error": None,
+            "updated_at": now,
+        }
+
+    async def _run_job() -> None:
+        with _recommendation_jobs_lock:
+            job = _recommendation_jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "processing"
+            job["updated_at"] = datetime.now(timezone.utc)
+
+        try:
+            response = await _build_recommendation_response(
+                limit=limit,
+                force_refresh=force_refresh,
+                device_id=device_id,
+                db=db,
+                gemini=gemini,
+                recipe_cache=recipe_cache,
+            )
+            with _recommendation_jobs_lock:
+                job = _recommendation_jobs.get(job_id)
+                if not job:
+                    return
+                job["status"] = "completed"
+                job["recipes"] = response.recipes
+                job["total_count"] = response.total_count
+                job["updated_at"] = datetime.now(timezone.utc)
+        except Exception as exc:
+            logger.exception("recipe recommendation job failed job_id=%s device_id=%s", job_id, device_id)
+            with _recommendation_jobs_lock:
+                job = _recommendation_jobs.get(job_id)
+                if not job:
+                    return
+                job["status"] = "failed"
+                job["error"] = str(exc)
+                job["updated_at"] = datetime.now(timezone.utc)
+
+    asyncio.create_task(_run_job())
+    return RecommendationJobCreateResponse(job_id=job_id, status="pending")
+
+
+@router.get("/recommendations/jobs/{job_id}", response_model=RecommendationJobStatusResponse)
+async def get_recommendation_job_status(
+    job_id: str,
+    device_id: str = Depends(get_device_id),
+):
+    now = datetime.now(timezone.utc)
+    with _recommendation_jobs_lock:
+        _prune_recommendation_jobs_locked(now)
+        job = _recommendation_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation job not found.")
+        if job.get("device_id") != device_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation job not found.")
+
+        recipes = job.get("recipes") or []
+        if not isinstance(recipes, list):
+            recipes = []
+
+        return RecommendationJobStatusResponse(
+            job_id=job_id,
+            status=str(job.get("status") or "pending"),
+            recipes=recipes,
+            total_count=int(job.get("total_count") or len(recipes)),
+            error=job.get("error"),
+        )
 
 
 @router.get("/favorites", response_model=RecipeListResponse)
