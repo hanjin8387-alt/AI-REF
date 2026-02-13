@@ -273,10 +273,24 @@
   - Benchmark: `N/A`
 
 ## Commit B-14: chore(perf): PRL-003 add perf smoke benchmark script
-- Commit: `pending`
+- Commit: `274ee2e`
 - Files:
   - `scripts/perf-smoke.sh`
 - Commands:
   - Perf smoke: `C:\Program Files\Git\bin\bash.exe -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
 - Result:
   - Perf smoke: `PASS` (`/health avg=91.2ms p95=164.8ms`, `/inventory avg=86.3ms p95=95.5ms`)
+
+## Commit B-15: perf(build): BS-001 remove console in production
+- Commit: `pending`
+- Files:
+  - `prometheus-app/babel.config.js`
+  - `prometheus-app/package.json`
+  - `prometheus-app/package-lock.json`
+- Commands:
+  - Test: `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Benchmark: `N/A (master plan does not define a separate CLI benchmark for this build-config task)`
+- Result:
+  - Tests: `PASS` (`4 suites, 21 tests`)
+  - Benchmark: `N/A`
+  - Notes: First run failed due Babel cache setup order; fixed with minimal config change and reran successfully.
