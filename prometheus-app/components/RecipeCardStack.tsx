@@ -1,5 +1,5 @@
-﻿import React, { useRef, useState } from 'react';
-import { Animated, Dimensions, Image, PanResponder, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Animated, Dimensions, PanResponder, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import Colors from '@/constants/Colors';
@@ -16,6 +16,59 @@ type RecipeCardStackProps = {
   onSwipeRight?: (recipe: ApiRecipe) => void;
   onCardPress?: (recipe: ApiRecipe) => void;
 };
+
+type FadingRecipeImageProps = {
+  imageUrl?: string;
+};
+
+function FadingRecipeImage({ imageUrl }: FadingRecipeImageProps) {
+  const [failed, setFailed] = useState(false);
+  const imageOpacity = useRef(new Animated.Value(imageUrl ? 0 : 1)).current;
+  const placeholderOpacity = useRef(new Animated.Value(imageUrl ? 1 : 0)).current;
+
+  const handleLoaded = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(imageOpacity, {
+        toValue: 1,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+      Animated.timing(placeholderOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [imageOpacity, placeholderOpacity]);
+
+  const handleError = useCallback(() => {
+    setFailed(true);
+    imageOpacity.setValue(0);
+    placeholderOpacity.setValue(1);
+  }, [imageOpacity, placeholderOpacity]);
+
+  if (!imageUrl || failed) {
+    return (
+      <View style={styles.imageFallback}>
+        <Text style={styles.imageFallbackText}>레시피</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.imageWrap}>
+      <Animated.View style={[styles.imagePlaceholder, { opacity: placeholderOpacity }]}>
+        <Text style={styles.imagePlaceholderText}>이미지 로딩 중</Text>
+      </Animated.View>
+      <Animated.Image
+        source={{ uri: imageUrl }}
+        style={[styles.cardImage, { opacity: imageOpacity }]}
+        onLoad={handleLoaded}
+        onError={handleError}
+      />
+    </View>
+  );
+}
 
 function toKoreanDifficulty(value: string) {
   const normalized = value.toLowerCase();
@@ -111,13 +164,7 @@ function RecipeCardStackComponent({ recipes, onSwipeLeft, onSwipeRight, onCardPr
         {...(isTop ? panResponder.panHandlers : {})}
       >
         <LinearGradient colors={['#FFFFFF', '#F3F7F5']} style={styles.cardGradient}>
-          {recipe.image_url ? (
-            <Image source={{ uri: recipe.image_url }} style={styles.cardImage} />
-          ) : (
-            <View style={styles.imageFallback}>
-              <Text style={styles.imageFallbackText}>레시피</Text>
-            </View>
-          )}
+          <FadingRecipeImage imageUrl={recipe.image_url} />
 
           <View style={styles.cardContent}>
             <View style={styles.badgeRow}>
@@ -241,8 +288,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  imageWrap: {
     width: '100%',
     height: '50%',
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: '#ECF2EF',
+  },
+  imagePlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DDE8E2',
+  },
+  imagePlaceholderText: {
+    color: Colors.gray600,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
   imageFallback: {
     width: '100%',

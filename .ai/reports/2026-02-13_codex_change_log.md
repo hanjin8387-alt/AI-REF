@@ -425,7 +425,7 @@
   - First perf-smoke invocation failed due PowerShell path quoting; rerun command passed with the same inputs.
 
 ## Commit P2-8: perf(app): FR-005 offload large JSON parsing with worker fallback
-- Commit: `(pending)`
+- Commit: `d81151f`
 - Files:
   - `prometheus-app/services/http-client.ts`
   - `prometheus-app/utils/json-worker.ts`
@@ -439,3 +439,17 @@
 - Notes:
   - Web GET JSON bodies now parse through worker path for large payloads, with automatic fallback to direct parse on worker errors/timeouts.
   - Added dedicated worker parser unit tests for normal, worker, and fallback paths.
+
+## Commit P2-9: perf(ux): FR-006 add image placeholder and fade-in
+- Commit: `(pending)`
+- Files:
+  - `prometheus-app/components/RecipeCardStack.tsx`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 28 tests`)
+  - Perf smoke: `PASS` (`/health avg=86.8ms p95=130.5ms`, `/inventory avg=83.3ms p95=90.0ms`)
+- Notes:
+  - Recipe card image now shows a loading placeholder and cross-fades into the final image on load.
+  - Image load failure still falls back to the static recipe placeholder block.
