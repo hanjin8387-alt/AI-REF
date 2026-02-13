@@ -258,3 +258,12 @@
   - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
 - Test result:
   - `1 passed`, exit code `0`.
+
+## C-1 ??chore(test): align jest test discovery for *-test filenames
+- Code changes:
+  - Updated `prometheus-app/jest.config.js` `testMatch` to include `**/__tests__/**/*-test.(ts|tsx|js)` in addition to `(test|spec)` naming.
+  - Ensures existing file `components/__tests__/StyledText-test.js` is discovered by default `npm test` run.
+- Test command:
+  - `cd prometheus-app && npm test` (execution used `npm.cmd test` in PowerShell)
+- Test result:
+  - `1 passed`, exit code `0`.
