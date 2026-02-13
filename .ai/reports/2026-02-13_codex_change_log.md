@@ -500,7 +500,7 @@
   - Added regression test that stale offline inventory cache is ignored.
 
 ## Commit P2-13: docs(perf): PRL-004 document performance budget
-- Commit: `(pending)`
+- Commit: `7d22bad`
 - Files:
   - `.ai/reports/2026-02-13_perf_budget.md`
 - Commands:
@@ -511,3 +511,16 @@
   - Perf smoke: `PASS` (`/health avg=82.9ms p95=86.7ms`, `/inventory avg=86.2ms p95=98.2ms`)
 - Notes:
   - Added explicit budget thresholds and latest measured snapshot to a dedicated performance budget document.
+
+## Commit P2-14: perf(observability): OM-004 add release perf comparison memo
+- Commit: `(pending)`
+- Files:
+  - `.ai/reports/2026-02-13_release_perf_comparison.md`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Perf smoke: `& 'C:\Program Files\Git\bin\bash.exe' -lc "cd '/c/Users/HJSA/Desktop/개발/AI REF' && API_URL='https://ai-ref-api-274026276907.asia-northeast3.run.app' REQUEST_COUNT=10 P95_BUDGET_MS=5000 ./scripts/perf-smoke.sh"`
+- Result:
+  - Tests: `PASS` (`6 suites, 29 tests`)
+  - Perf smoke: `PASS` (`/health avg=87.3ms p95=97.9ms`, `/inventory avg=85.9ms p95=97.4ms`)
+- Notes:
+  - Added release-level snapshot comparison memo with trend interpretation and gate recommendations.
