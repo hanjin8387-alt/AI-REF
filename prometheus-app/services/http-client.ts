@@ -2,6 +2,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { offlineCache } from './offline-cache';
+import { logHttpPerf } from './perf-logger';
 
 const APP_TOKEN =
   process.env.EXPO_PUBLIC_APP_TOKEN ||
@@ -230,6 +231,13 @@ export class HttpClient {
     if (method === 'GET' && cacheTtlMs > 0) {
       const cached = this.cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
+        logHttpPerf({
+          method,
+          endpoint,
+          duration_ms: 0,
+          status: 'ok',
+          cache: 'hit',
+        });
         return { data: cached.data as T };
       }
     }
@@ -238,6 +246,7 @@ export class HttpClient {
       const controller = new AbortController();
       const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const startedAt = Date.now();
 
       try {
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -257,6 +266,13 @@ export class HttpClient {
             const errorText = await response.text().catch(() => '');
             if (errorText) detail = errorText;
           }
+          logHttpPerf({
+            method,
+            endpoint,
+            duration_ms: Date.now() - startedAt,
+            status: 'error',
+            cache: method === 'GET' ? 'miss' : 'none',
+          });
           return { error: this.localizeServerError(detail) };
         }
 
@@ -269,9 +285,23 @@ export class HttpClient {
         }
 
         this.recordSyncSuccess();
+        logHttpPerf({
+          method,
+          endpoint,
+          duration_ms: Date.now() - startedAt,
+          status: 'ok',
+          cache: method === 'GET' ? 'miss' : 'none',
+        });
         return { data };
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
+          logHttpPerf({
+            method,
+            endpoint,
+            duration_ms: Date.now() - startedAt,
+            status: 'timeout',
+            cache: method === 'GET' ? 'miss' : 'none',
+          });
           return { error: '요청 시간이 초과되었어요. 잠시 후 다시 시도해 주세요.' };
         }
 
@@ -326,6 +356,13 @@ export class HttpClient {
 
         if (error instanceof Error) {
           const rawMessage = error.message || '';
+          logHttpPerf({
+            method,
+            endpoint,
+            duration_ms: Date.now() - startedAt,
+            status: 'error',
+            cache: method === 'GET' ? 'miss' : 'none',
+          });
           if (rawMessage === 'Failed to fetch' || rawMessage === 'Network request failed' || rawMessage === 'Load failed') {
             if (method !== 'GET') {
               return { error: '네트워크가 불안정해 요청을 임시 보관했어요. 동기화 센터에서 재시도할 수 있어요.' };
@@ -344,7 +381,16 @@ export class HttpClient {
     if (method === 'GET' && !options.skipRequestDedup) {
       const inflightKey = this.buildCacheKey(endpoint, method);
       const pending = this.inflightRequests.get(inflightKey) as Promise<ApiResponse<T>> | undefined;
-      if (pending) return pending;
+      if (pending) {
+        logHttpPerf({
+          method,
+          endpoint,
+          duration_ms: 0,
+          status: 'ok',
+          cache: 'dedup',
+        });
+        return pending;
+      }
 
       const dedupedPromise = performRequest().finally(() => {
         this.inflightRequests.delete(inflightKey);
@@ -562,6 +608,7 @@ export class HttpClient {
     return normalized;
   }
 }
+
 
 
 

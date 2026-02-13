@@ -235,7 +235,7 @@
   - Benchmark: `N/A`
 
 ## Commit B-11: perf(observability): OM-002 log gemini call duration
-- Commit: `pending`
+- Commit: `3da128e`
 - Files:
   - `prometheus-api/app/services/gemini_service.py`
   - `prometheus-api/tests/test_services/test_gemini_service.py`
@@ -244,4 +244,18 @@
   - Benchmark: `N/A (master plan does not define a CLI benchmark for this observability task)`
 - Result:
   - Tests: `PASS` (`42 passed`)
+  - Benchmark: `N/A`
+
+## Commit B-12: perf(observability): OM-003 add cache and client perf logging
+- Commit: `pending`
+- Files:
+  - `prometheus-api/app/services/recipe_cache.py`
+  - `prometheus-app/services/perf-logger.ts`
+  - `prometheus-app/services/http-client.ts`
+- Commands:
+  - Test (app): `cmd /c "cd /d prometheus-app && npm test -- --runInBand"`
+  - Test (api): `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark: `N/A (master plan does not define a separate CLI benchmark for this observability task)`
+- Result:
+  - Tests: `PASS` (`app: 4 suites, 20 tests / api: 42 passed`)
   - Benchmark: `N/A`

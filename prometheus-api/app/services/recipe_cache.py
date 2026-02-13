@@ -81,10 +81,20 @@ class RecipeCache:
             batch_bucket = self._batch_store.get(device_id)
             recipe_bucket = self._recipe_store.get(device_id)
             if not batch_bucket or not recipe_bucket:
+                logger.info(
+                    "recipe_cache.batch device_id=%s fingerprint=%s status=miss reason=device_not_found",
+                    device_id,
+                    inventory_fingerprint,
+                )
                 return None
 
             batch_payload = batch_bucket.get(inventory_fingerprint)
             if not batch_payload:
+                logger.info(
+                    "recipe_cache.batch device_id=%s fingerprint=%s status=miss reason=fingerprint_not_found",
+                    device_id,
+                    inventory_fingerprint,
+                )
                 return None
 
             batch_expiry, recipe_ids = batch_payload
@@ -94,21 +104,44 @@ class RecipeCache:
                     del self._batch_store[device_id]
                     if device_id not in self._recipe_store:
                         self._device_last_updated.pop(device_id, None)
+                logger.info(
+                    "recipe_cache.batch device_id=%s fingerprint=%s status=miss reason=batch_expired",
+                    device_id,
+                    inventory_fingerprint,
+                )
                 return None
 
             recipes: list[Recipe] = []
             for recipe_id in recipe_ids:
                 recipe_payload = recipe_bucket.get(recipe_id)
                 if not recipe_payload:
+                    logger.info(
+                        "recipe_cache.batch device_id=%s fingerprint=%s status=miss reason=recipe_missing recipe_id=%s",
+                        device_id,
+                        inventory_fingerprint,
+                        recipe_id,
+                    )
                     return None
                 recipe_expiry, recipe = recipe_payload
                 if recipe_expiry < now:
                     del recipe_bucket[recipe_id]
+                    logger.info(
+                        "recipe_cache.batch device_id=%s fingerprint=%s status=miss reason=recipe_expired recipe_id=%s",
+                        device_id,
+                        inventory_fingerprint,
+                        recipe_id,
+                    )
                     return None
                 recipes.append(recipe)
 
             if limit is not None:
-                return recipes[:limit]
+                recipes = recipes[:limit]
+            logger.info(
+                "recipe_cache.batch device_id=%s fingerprint=%s status=hit count=%s",
+                device_id,
+                inventory_fingerprint,
+                len(recipes),
+            )
             return recipes
 
     def get(self, device_id: str, recipe_id: str) -> Optional[Recipe]:
@@ -116,10 +149,20 @@ class RecipeCache:
         with self._lock:
             bucket = self._recipe_store.get(device_id)
             if not bucket:
+                logger.info(
+                    "recipe_cache.recipe device_id=%s recipe_id=%s status=miss reason=device_not_found",
+                    device_id,
+                    recipe_id,
+                )
                 return None
 
             payload = bucket.get(recipe_id)
             if not payload:
+                logger.info(
+                    "recipe_cache.recipe device_id=%s recipe_id=%s status=miss reason=recipe_not_found",
+                    device_id,
+                    recipe_id,
+                )
                 return None
 
             expiry, recipe = payload
@@ -129,8 +172,18 @@ class RecipeCache:
                     del self._recipe_store[device_id]
                     if device_id not in self._batch_store:
                         self._device_last_updated.pop(device_id, None)
+                logger.info(
+                    "recipe_cache.recipe device_id=%s recipe_id=%s status=miss reason=recipe_expired",
+                    device_id,
+                    recipe_id,
+                )
                 return None
 
+            logger.info(
+                "recipe_cache.recipe device_id=%s recipe_id=%s status=hit",
+                device_id,
+                recipe_id,
+            )
             return recipe
 
     def invalidate_device(self, device_id: str) -> None:
