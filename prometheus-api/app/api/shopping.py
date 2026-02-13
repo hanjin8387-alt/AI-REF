@@ -1,4 +1,5 @@
-﻿from datetime import datetime, timedelta, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
@@ -254,6 +255,16 @@ def _build_low_stock_suggestions(
 
     suggestions.sort(key=lambda item: item.predicted_days_left)
     return suggestions
+
+
+def _schedule_notification(**kwargs) -> None:
+    async def _notify() -> None:
+        try:
+            await asyncio.to_thread(create_notification, **kwargs)
+        except Exception:
+            logger.exception("shopping notification dispatch failed")
+
+    asyncio.create_task(_notify())
 
 
 @router.get("", response_model=ShoppingListResponse)
@@ -593,7 +604,7 @@ async def checkout_shopping_items(
             )
 
         if request.add_to_inventory:
-            create_notification(
+            _schedule_notification(
                 db=db,
                 device_id=device_id,
                 notification_type=NotificationType.INVENTORY,
@@ -606,7 +617,7 @@ async def checkout_shopping_items(
                 },
             )
         else:
-            create_notification(
+            _schedule_notification(
                 db=db,
                 device_id=device_id,
                 notification_type=NotificationType.SYSTEM,
@@ -730,4 +741,6 @@ async def delete_shopping_item(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete shopping item.",
         ) from exc
+
+
 

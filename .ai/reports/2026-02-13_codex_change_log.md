@@ -126,7 +126,7 @@
   - Benchmark: `N/A (manual profiler required in UI runtime)`
 
 ## Commit B-2: perf(app): FR-002 replace inline handlers with useCallback
-- Commit: pending
+- Commit: `ad49ccd`
 - Files:
   - `prometheus-app/app/(tabs)/index.tsx`
   - `prometheus-app/app/(tabs)/inventory.tsx`
@@ -137,3 +137,14 @@
 - Result:
   - Tests: `PASS` (`4 suites, 18 tests`)
   - Benchmark: `N/A (manual profiler required in UI runtime)`
+
+## Commit B-3: perf(api): BL-004 parallelize checkout notifications
+- Commit: pending
+- Files:
+  - `prometheus-api/app/api/shopping.py`
+- Commands:
+  - Test: `cd prometheus-api; py -m pytest tests/ -v --tb=short`
+  - Benchmark: `hey -n 50 -c 5 -m POST $API/shopping/checkout`
+- Result:
+  - Tests: `PASS` (`40 passed`)
+  - Benchmark: `PASS` (`p95=9.3249s`, avg `0.7647s`, status `401x50`)
