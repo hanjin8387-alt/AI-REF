@@ -48,6 +48,8 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
-# ── Gemini / Antigravity agent state (local only) ───────────────────────────
+# ── AI agent artefacts (local only) ─────────────────────────────────────────
+.ai/
 .gemini/
 .agent/
+review*.md
