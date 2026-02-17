@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "PROMETHEUS",
+    "slug": "prometheus-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "prometheus",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#00D084"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.prometheus.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "재료와 영수증을 스캔하려면 카메라 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "재료 사진을 선택하려면 사진 보관함 권한이 필요합니다."
+      }
+    },
+    "android": {
+      "package": "com.prometheus.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#00D084"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png",
+      "name": "PROMETHEUS",
+      "shortName": "PROMETHEUS",
+      "description": "스마트 식재료 관리 도우미",
+      "themeColor": "#F5F8F7",
+      "backgroundColor": "#F5F8F7"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "재료와 영수증을 스캔하려면 카메라 권한이 필요합니다."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "재료 사진을 선택하려면 사진 보관함 권한이 필요합니다."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://ai-ref-api-274026276907.asia-northeast3.run.app"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-﻿import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,8 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as ImagePicker from 'expo-image-picker';
 
 import Colors from '@/constants/Colors';
 import { RoundButton } from '@/components/RoundButton';
@@ -54,8 +52,30 @@ function toIsoDateFromNow(days?: number): string | undefined {
   return date.toISOString().slice(0, 10);
 }
 
+async function promptWebImage(capture: boolean): Promise<File | null> {
+  if (typeof document === 'undefined') {
+    throw new Error('웹 파일 선택기를 사용할 수 없어요.');
+  }
+
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    if (capture) {
+      // Hint mobile browsers to open camera.
+      (input as unknown as { capture?: string }).capture = 'environment';
+    }
+
+    input.onchange = () => {
+      const file = input.files?.[0] || null;
+      resolve(file);
+    };
+
+    input.click();
+  });
+}
+
 export default function ScanScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
   const [scanState, setScanState] = useState<ScanState>('camera');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResultPayload | null>(null);
@@ -78,51 +98,54 @@ export default function ScanScreen() {
   } | null>(null);
   const [addingBarcodeItem, setAddingBarcodeItem] = useState(false);
 
-  const cameraRef = useRef<CameraView>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        try {
+          URL.revokeObjectURL(objectUrlRef.current);
+        } catch {
+          // ignore
+        }
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const resolveSourceType = (inputSource: 'camera' | 'gallery', mode: ScanMode): ScanSourceType => {
     if (mode === 'receipt') return 'receipt';
     return inputSource;
   };
 
-  if (!permission) {
-    return <View style={styles.container} />;
-  }
+  const setCapturedObjectUrl = (nextUri: string | null) => {
+    if (objectUrlRef.current && objectUrlRef.current !== nextUri) {
+      try {
+        URL.revokeObjectURL(objectUrlRef.current);
+      } catch {
+        // ignore
+      }
+      objectUrlRef.current = null;
+    }
 
-  if (!permission.granted) {
-    return (
-      <View style={styles.permissionContainer}>
-        <Text style={styles.permissionTitle}>카메라 권한이 필요해요</Text>
-        <Text style={styles.permissionText}>재료 또는 영수증을 스캔하려면 카메라 접근을 허용해 주세요.</Text>
-        <RoundButton title="카메라 권한 허용" onPress={requestPermission} size="large" />
-      </View>
-    );
-  }
-
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
-    const photo = await cameraRef.current.takePictureAsync({
-      quality: 0.65,
-      skipProcessing: true,
-    });
-    if (!photo) return;
-    setCapturedImage(photo.uri);
-    setSourceType(resolveSourceType('camera', scanMode));
-    setAnalyzeError(null);
-    setScanState('preview');
+    objectUrlRef.current = nextUri;
+    setCapturedImage(nextUri);
   };
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-    });
-    if (result.canceled || !result.assets[0]) return;
+  const pickImage = async (capture: boolean) => {
+    try {
+      const file = await promptWebImage(capture);
+      if (!file) return;
 
-    setCapturedImage(result.assets[0].uri);
-    setSourceType(resolveSourceType('gallery', scanMode));
-    setAnalyzeError(null);
-    setScanState('preview');
+      const objectUrl = URL.createObjectURL(file);
+      setCapturedObjectUrl(objectUrl);
+      setSourceType(resolveSourceType(capture ? 'camera' : 'gallery', scanMode));
+      setAnalyzeError(null);
+      setScanState('preview');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '이미지를 선택하지 못했어요.';
+      Alert.alert('선택 실패', message);
+    }
   };
 
   const pollScanResult = async (
@@ -226,9 +249,7 @@ export default function ScanScreen() {
   const updateItemCategory = (index: number, category: StorageCategory) => {
     setScanResult(prev => {
       if (!prev) return prev;
-      const nextItems = prev.items.map((item, currentIndex) =>
-        currentIndex === index ? { ...item, category } : item
-      );
+      const nextItems = prev.items.map((item, currentIndex) => (currentIndex === index ? { ...item, category } : item));
       return { ...prev, items: nextItems };
     });
   };
@@ -294,7 +315,7 @@ export default function ScanScreen() {
   };
 
   const resetScan = () => {
-    setCapturedImage(null);
+    setCapturedObjectUrl(null);
     setScanResult(null);
     setAnalyzeError(null);
     setScanState('camera');
@@ -403,12 +424,11 @@ export default function ScanScreen() {
   if (scanState === 'camera') {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <CameraView ref={cameraRef} style={styles.camera} facing="back">
-          <View style={styles.cameraHeader}>
-            <Text style={styles.cameraTitle}>스캔</Text>
-            <Text style={styles.cameraSubtitle}>재료 또는 장보기 영수증을 촬영해 주세요.</Text>
-          </View>
+        <StatusBar barStyle="dark-content" />
+
+        <View style={styles.webIntro}>
+          <Text style={styles.webTitle}>스캔</Text>
+          <Text style={styles.webSubtitle}>재료 또는 영수증 사진을 촬영하거나 선택해 주세요.</Text>
 
           <View style={styles.scanTypeContainer}>
             <TouchableOpacity
@@ -427,59 +447,51 @@ export default function ScanScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.barcodePanel}>
-            <Text style={styles.barcodeTitle}>바코드 빠른 추가</Text>
-            <View style={styles.barcodeRow}>
-              <TextInput
-                value={barcodeInput}
-                onChangeText={setBarcodeInput}
-                placeholder="바코드 번호"
-                placeholderTextColor="rgba(255,255,255,0.65)"
-                style={styles.barcodeInput}
-                keyboardType="number-pad"
-              />
+          <View style={styles.webButtonStack}>
+            <RoundButton title="카메라로 촬영" onPress={() => pickImage(true)} size="large" />
+            <View style={{ height: 12 }} />
+            <RoundButton title="갤러리에서 선택" onPress={() => pickImage(false)} size="large" variant="outline" />
+          </View>
+        </View>
+
+        <View style={styles.barcodePanel}>
+          <Text style={styles.barcodeTitle}>바코드 빠른 추가</Text>
+          <View style={styles.barcodeRow}>
+            <TextInput
+              value={barcodeInput}
+              onChangeText={setBarcodeInput}
+              placeholder="바코드 번호"
+              placeholderTextColor={Colors.gray500}
+              style={styles.barcodeInput}
+              keyboardType="number-pad"
+            />
+            <TouchableOpacity
+              style={styles.barcodeLookupButton}
+              onPress={lookupBarcode}
+              disabled={barcodeLoading}
+              accessibilityLabel="바코드 조회"
+            >
+              <Text style={styles.barcodeLookupButtonText}>{barcodeLoading ? '조회 중...' : '조회'}</Text>
+            </TouchableOpacity>
+          </View>
+          {barcodeProduct ? (
+            <View style={styles.barcodeResultBox}>
+              <Text style={styles.barcodeResultName}>{barcodeProduct.name}</Text>
+              <Text style={styles.barcodeResultMeta}>
+                {barcodeProduct.category || '카테고리 없음'}
+                {barcodeProduct.suggested_expiry_days ? ` / 권장 유통 ${barcodeProduct.suggested_expiry_days}일` : ''}
+              </Text>
               <TouchableOpacity
-                style={styles.barcodeLookupButton}
-                onPress={lookupBarcode}
-                disabled={barcodeLoading}
-                accessibilityLabel="바코드 조회"
+                style={styles.barcodeAddButton}
+                onPress={addBarcodeProductToInventory}
+                disabled={addingBarcodeItem}
+                accessibilityLabel={`${barcodeProduct.name} 인벤토리에 1개 추가`}
               >
-                <Text style={styles.barcodeLookupButtonText}>{barcodeLoading ? '조회 중...' : '조회'}</Text>
+                <Text style={styles.barcodeAddButtonText}>{addingBarcodeItem ? '추가 중...' : '인벤토리에 1개 추가'}</Text>
               </TouchableOpacity>
             </View>
-            {barcodeProduct ? (
-              <View style={styles.barcodeResultBox}>
-                <Text style={styles.barcodeResultName}>{barcodeProduct.name}</Text>
-                <Text style={styles.barcodeResultMeta}>
-                  {barcodeProduct.category || '카테고리 없음'}
-                  {barcodeProduct.suggested_expiry_days ? ` / 권장 유통 ${barcodeProduct.suggested_expiry_days}일` : ''}
-                </Text>
-                <TouchableOpacity
-                  style={styles.barcodeAddButton}
-                  onPress={addBarcodeProductToInventory}
-                  disabled={addingBarcodeItem}
-                  accessibilityLabel={`${barcodeProduct.name} 인벤토리에 1개 추가`}
-                >
-                  <Text style={styles.barcodeAddButtonText}>
-                    {addingBarcodeItem ? '추가 중...' : '인벤토리에 1개 추가'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-          </View>
-
-          <View style={styles.cameraControls}>
-            <TouchableOpacity style={styles.galleryButton} onPress={pickImage} accessibilityLabel="갤러리에서 이미지 선택">
-              <Text style={styles.galleryText}>갤러리</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.captureButton} onPress={takePicture} accessibilityLabel="카메라 촬영">
-              <View style={styles.captureButtonInner} />
-            </TouchableOpacity>
-
-            <View style={styles.galleryButton} />
-          </View>
-        </CameraView>
+          ) : null}
+        </View>
       </View>
     );
   }
@@ -567,7 +579,9 @@ export default function ScanScreen() {
             <View style={styles.receiptMetaBox}>
               <Text style={styles.receiptMetaTitle}>영수증 메타</Text>
               {scanResult.receipt_store ? <Text style={styles.receiptMetaText}>매장: {scanResult.receipt_store}</Text> : null}
-              {scanResult.receipt_purchased_at ? <Text style={styles.receiptMetaText}>구매일: {scanResult.receipt_purchased_at}</Text> : null}
+              {scanResult.receipt_purchased_at ? (
+                <Text style={styles.receiptMetaText}>구매일: {scanResult.receipt_purchased_at}</Text>
+              ) : null}
             </View>
           ) : null}
 
@@ -585,9 +599,7 @@ export default function ScanScreen() {
       ) : null}
 
       <View style={styles.actionContainer}>
-        {scanState === 'preview' ? (
-          <RoundButton title="분석하기" onPress={analyzeScan} size="large" />
-        ) : null}
+        {scanState === 'preview' ? <RoundButton title="분석하기" onPress={analyzeScan} size="large" /> : null}
         {scanState === 'result' ? (
           <>
             <RoundButton title="인벤토리에 저장" onPress={addToInventory} size="large" loading={savingInventory} />
@@ -602,27 +614,37 @@ export default function ScanScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F8F7' },
-  permissionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  permissionTitle: { fontSize: 22, fontWeight: '700', color: '#132018', marginBottom: 8, textAlign: 'center' },
-  permissionText: { color: Colors.gray600, textAlign: 'center', marginBottom: 16 },
-  camera: { flex: 1, justifyContent: 'space-between' },
-  cameraHeader: { paddingTop: 60, paddingHorizontal: 24 },
-  cameraTitle: { color: Colors.white, fontSize: 28, fontWeight: '700' },
-  cameraSubtitle: { color: 'rgba(255,255,255,0.9)', marginTop: 6 },
-  scanTypeContainer: { flexDirection: 'row', marginHorizontal: 24, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 12, padding: 4 },
+  webIntro: {
+    marginTop: 54,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: '#132018',
+  },
+  webTitle: { color: Colors.white, fontSize: 28, fontWeight: '700' },
+  webSubtitle: { color: 'rgba(255,255,255,0.9)', marginTop: 6, marginBottom: 12 },
+  scanTypeContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 12,
+    padding: 4,
+  },
   scanTypeButton: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
   scanTypeButtonActive: { backgroundColor: Colors.white },
   scanTypeText: { color: Colors.white, fontWeight: '700' },
   scanTypeTextActive: { color: '#22352B' },
+  webButtonStack: { marginTop: 14 },
   barcodePanel: {
-    marginHorizontal: 24,
-    marginTop: 10,
+    marginHorizontal: 16,
+    marginTop: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    padding: 10,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: '#DDE6E1',
+    padding: 12,
   },
   barcodeTitle: {
-    color: Colors.white,
+    color: '#132018',
     fontWeight: '700',
     marginBottom: 8,
     fontSize: 12,
@@ -636,57 +658,52 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 9,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    color: Colors.white,
+    borderColor: '#DDE6E1',
+    backgroundColor: '#F9FBFA',
+    color: '#132018',
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   barcodeLookupButton: {
     borderRadius: 9,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   barcodeLookupButtonText: {
-    color: '#22352B',
+    color: Colors.white,
     fontWeight: '700',
     fontSize: 12,
   },
   barcodeResultBox: {
-    marginTop: 8,
+    marginTop: 10,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: '#F9FBFA',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    padding: 9,
+    borderColor: '#DDE6E1',
+    padding: 10,
   },
   barcodeResultName: {
-    color: Colors.white,
+    color: '#132018',
     fontWeight: '700',
   },
   barcodeResultMeta: {
-    color: 'rgba(255,255,255,0.9)',
+    color: Colors.gray700,
     fontSize: 12,
     marginTop: 3,
   },
   barcodeAddButton: {
-    marginTop: 8,
+    marginTop: 10,
     borderRadius: 8,
     backgroundColor: Colors.primary,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   barcodeAddButtonText: {
     color: Colors.white,
     fontWeight: '700',
     fontSize: 12,
   },
-  cameraControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 28, paddingBottom: 36 },
-  galleryButton: { width: 72, alignItems: 'center' },
-  galleryText: { color: Colors.white, fontWeight: '600' },
-  captureButton: { width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: Colors.white, alignItems: 'center', justifyContent: 'center' },
-  captureButtonInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.white },
   header: {
     paddingTop: 54,
     paddingHorizontal: 16,
@@ -754,5 +771,4 @@ const styles = StyleSheet.create({
   },
   actionSpacer: { height: 10 },
 });
-
 

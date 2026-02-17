@@ -1,0 +1,8 @@
+node_modules/
+!dist/assets/node_modules/
+!dist/assets/node_modules/**
+.expo/
+.git/
+.gitignore
+firebase-debug.log
+web-build/

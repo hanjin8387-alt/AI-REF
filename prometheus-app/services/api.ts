@@ -541,8 +541,12 @@ class ApiClient extends HttpClient {
     });
   }
 
-  async bootstrap() {
-    return this.request<BootstrapResponse>('/auth/bootstrap', { cacheTtlMs: 0, skipOfflineQueue: true });
+  async bootstrap(options: { timeoutMs?: number } = {}) {
+    return this.request<BootstrapResponse>('/auth/bootstrap', {
+      cacheTtlMs: 0,
+      skipOfflineQueue: true,
+      timeoutMs: options.timeoutMs,
+    });
   }
 
   private mergeById<T extends { id: string }>(base: T[], delta: T[]): T[] {

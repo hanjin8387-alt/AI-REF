@@ -1,0 +1,53 @@
+# =============================================================================
+# PROMETHEUS AI REF — .gitignore
+# =============================================================================
+
+# ── Secrets / Environment ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# ── Node / Expo ──────────────────────────────────────────────────────────────
+node_modules/
+.expo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Tool artefacts (deploy / stitch / restore) ──────────────────────────────
+.deploy-snapshots/
+.stitch/
+.tmp_restore/
+.tmp_restore_*.json
+
+# ── Test / temporary outputs ─────────────────────────────────────────────────
+results-*.json
+*.log
+coverage/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# ── Gemini / Antigravity agent state (local only) ───────────────────────────
+.gemini/
+.agent/

@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.core.database import get_db, get_supabase_client
+from app.core.database import get_db, get_idempotency_store, get_supabase_client
 from app.main import app
 from app.schemas.schemas import FoodItem
 from app.services.gemini_service import get_gemini_service
@@ -42,9 +42,11 @@ def pytest_configure() -> None:
 def _reset_settings_cache() -> None:
     get_settings.cache_clear()
     get_supabase_client.cache_clear()
+    get_idempotency_store.cache_clear()
     yield
     get_settings.cache_clear()
     get_supabase_client.cache_clear()
+    get_idempotency_store.cache_clear()
 
 
 @dataclass

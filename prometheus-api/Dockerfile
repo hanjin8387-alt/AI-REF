@@ -18,8 +18,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
-    pip install --no-cache-dir --find-links=/wheels -r requirements.txt
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt \
+    && rm -rf /wheels
 
 COPY ./app ./app
 

@@ -1,16 +1,15 @@
-﻿import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { offlineCache } from './offline-cache';
 import { logHttpPerf } from './perf-logger';
 import { parseJsonWithWorker } from '../utils/json-worker';
+import { loadOrCreateDeviceId } from './device-id-storage';
 
 const APP_TOKEN =
   process.env.EXPO_PUBLIC_APP_TOKEN ||
   (Constants.expoConfig?.extra?.appToken as string | undefined) ||
   '';
 const REQUEST_TIMEOUT_MS = 20000;
-const DEVICE_ID_FILE = 'prometheus-device-id.txt';
 const MAX_CLIENT_CACHE_ENTRIES = 200;
 const OFFLINE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -67,9 +66,11 @@ export class HttpClient {
     }
 
     this.initializingPromise = (async () => {
-      this.deviceId = await this.loadOrCreateDeviceId();
+      const deviceId = await loadOrCreateDeviceId();
+      this.deviceId = deviceId;
       this.initialized = true;
-      await this.registerDevice(this.deviceId, undefined, Platform.OS).catch(() => undefined);
+      // Fire-and-forget: do not block startup on network registration.
+      void this.registerDevice(deviceId, undefined, Platform.OS).catch(() => undefined);
     })();
 
     try {
@@ -91,6 +92,7 @@ export class HttpClient {
     return this.request<{ success: boolean; device_id: string; message: string }>('/auth/device-register', {
       skipInit: true,
       method: 'POST',
+      timeoutMs: 5000,
       body: JSON.stringify({
         device_id: deviceId,
         push_token: pushToken,
@@ -427,40 +429,6 @@ export class HttpClient {
     }
   }
 
-  private async loadOrCreateDeviceId(): Promise<string> {
-    if (typeof localStorage !== 'undefined') {
-      const webDeviceId = localStorage.getItem('prometheus_device_id');
-      if (webDeviceId) return webDeviceId;
-      const generated = this.generateDeviceId();
-      localStorage.setItem('prometheus_device_id', generated);
-      return generated;
-    }
-
-    const documentDirectory = FileSystem.documentDirectory;
-    if (!documentDirectory) {
-      return this.generateDeviceId();
-    }
-
-    const fileUri = `${documentDirectory}${DEVICE_ID_FILE}`;
-    try {
-      const existing = await FileSystem.readAsStringAsync(fileUri);
-      const trimmed = existing.trim();
-      if (trimmed) return trimmed;
-    } catch {
-      // first run
-    }
-
-    const created = this.generateDeviceId();
-    await FileSystem.writeAsStringAsync(fileUri, created);
-    return created;
-  }
-
-  private generateDeviceId(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return `device-${crypto.randomUUID()}`;
-    }
-    return `device-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-  }
 
   private async ensureInitialized() {
     if (!this.initialized) {
@@ -624,7 +592,6 @@ export class HttpClient {
 
     return normalized;
   }
-
   private async parseJsonBody<T>(response: Response): Promise<T> {
     if (Platform.OS === 'web' && typeof response.text === 'function') {
       const raw = await response.text();

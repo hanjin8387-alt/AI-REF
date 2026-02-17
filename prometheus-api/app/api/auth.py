@@ -13,9 +13,11 @@ from ..core.db_columns import (
     PRICE_HISTORY_SELECT_COLUMNS,
     SHOPPING_ITEM_SELECT_COLUMNS,
 )
+from ..core.config import get_settings
 from ..core.database import get_db
 from ..core.security import get_device_id, require_app_token
 from ..schemas.schemas import (
+    BootstrapResponse,
     BackupExportResponse,
     BackupRestoreRequest,
     BackupRestoreResponse,
@@ -50,6 +52,28 @@ BACKUP_SELECT_COLUMNS: dict[str, str] = {
     "inventory_logs": INVENTORY_LOG_SELECT_COLUMNS,
     "price_history": PRICE_HISTORY_SELECT_COLUMNS,
 }
+
+
+@router.get("/bootstrap", response_model=BootstrapResponse)
+async def bootstrap(
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+):
+    try:
+        device_rows = db.table("devices").select("device_id").eq("device_id", device_id).limit(1).execute().data or []
+        return BootstrapResponse(
+            api_ok=True,
+            token_required=get_settings().require_app_token,
+            device_registered=bool(device_rows),
+            sync_pending_count=0,
+            last_sync_at=None,
+        )
+    except Exception as exc:
+        logger.exception("bootstrap check failed device_id=%s", device_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bootstrap check failed",
+        ) from exc
 
 
 @router.post("/device-register", response_model=DeviceRegisterResponse)
