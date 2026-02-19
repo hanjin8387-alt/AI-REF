@@ -13,9 +13,9 @@ def test_require_admin_token_uses_timing_safe_compare(monkeypatch: pytest.Monkey
         return True
 
     monkeypatch.setattr(admin.secrets, "compare_digest", fake_compare_digest)
-    admin._require_admin_token("test-app-token")
+    admin._require_admin_token("test-admin-token")
 
-    assert calls == [("test-app-token", "test-app-token")]
+    assert calls == [("test-admin-token", "test-admin-token")]
 
 
 def test_require_admin_token_rejects_invalid_token() -> None:
@@ -25,7 +25,7 @@ def test_require_admin_token_rejects_invalid_token() -> None:
 
 
 def test_require_admin_token_rejects_when_server_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_TOKEN", "")
+    monkeypatch.setenv("ADMIN_TOKEN", "")
     get_settings.cache_clear()
 
     with pytest.raises(HTTPException) as exc:

@@ -43,6 +43,7 @@ export default function HomeScreen() {
   const [feedMode, setFeedMode] = useState<FeedMode>('recommended');
   const [recipes, setRecipes] = useState<ApiRecipe[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,6 +61,10 @@ export default function HomeScreen() {
     () => selectedRecipe?.ingredients.filter(ingredient => !ingredient.available) || [],
     [selectedRecipe]
   );
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
 
   useEffect(() => {
     if (!loading || feedMode !== 'recommended') {
@@ -136,7 +141,7 @@ export default function HomeScreen() {
   }, []);
 
   const refreshAll = useCallback(async (forceRefresh = false) => {
-    if (!loading) setRefreshing(true);
+    if (!loadingRef.current) setRefreshing(true);
     const [feedResult] = await Promise.all([loadFeed(forceRefresh), loadHomeSummary()]);
 
     if (feedResult.data) {
@@ -149,7 +154,7 @@ export default function HomeScreen() {
 
     setLoading(false);
     setRefreshing(false);
-  }, [loadFeed, loadHomeSummary, loading]);
+  }, [loadFeed, loadHomeSummary]);
 
   const prefetchAdjacentTabs = useCallback(() => {
     fireAndForget(

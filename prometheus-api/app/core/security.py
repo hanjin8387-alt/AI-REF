@@ -1,9 +1,14 @@
-from typing import Annotated
-import secrets
+from __future__ import annotations
 
-from fastapi import Header, HTTPException, status
+import hashlib
+import secrets
+from typing import Annotated
+
+from fastapi import Depends, Header, HTTPException, status
+from supabase import Client
 
 from .config import get_settings
+from .database import get_db
 
 
 def require_app_token(
@@ -50,6 +55,52 @@ def get_device_id(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Device is not allowed",
+        )
+
+    return device_id
+
+
+def hash_device_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def issue_device_token() -> tuple[str, str]:
+    raw_token = secrets.token_urlsafe(40)
+    return raw_token, hash_device_token(raw_token)
+
+
+def require_device_auth(
+    device_id: str = Depends(get_device_id),
+    db: Client = Depends(get_db),
+    x_device_token: Annotated[str | None, Header(alias="X-Device-Token")] = None,
+) -> str:
+    if not x_device_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-Device-Token header is required",
+        )
+
+    rows = (
+        db.table("devices")
+        .select("device_secret_hash")
+        .eq("device_id", device_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unknown device",
+        )
+
+    expected_hash = str(rows[0].get("device_secret_hash") or "")
+    actual_hash = hash_device_token(x_device_token)
+    if not expected_hash or not secrets.compare_digest(expected_hash, actual_hash):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid device token",
         )
 
     return device_id

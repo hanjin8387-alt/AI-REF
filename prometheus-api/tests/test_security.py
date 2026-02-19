@@ -55,7 +55,7 @@ def test_get_device_id_accepts_whitelisted_id(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_require_admin_token_accepts_valid_token() -> None:
-    _require_admin_token("test-app-token")
+    _require_admin_token("test-admin-token")
 
 
 def test_require_admin_token_rejects_invalid_token() -> None:

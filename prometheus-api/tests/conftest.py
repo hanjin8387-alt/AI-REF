@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from collections.abc import Iterable
@@ -16,6 +17,10 @@ from app.core.database import get_db, get_idempotency_store, get_supabase_client
 from app.main import app
 from app.schemas.schemas import FoodItem
 from app.services.gemini_service import get_gemini_service
+
+TEST_DEVICE_ID = "device-1234"
+TEST_DEVICE_TOKEN = "test-device-token"
+TEST_DEVICE_TOKEN_HASH = hashlib.sha256(TEST_DEVICE_TOKEN.encode("utf-8")).hexdigest()
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -295,6 +300,16 @@ def mock_fcm(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def client(mock_supabase: MockSupabaseClient, mock_gemini_service: MockGeminiService):
+    devices = mock_supabase.tables.setdefault("devices", [])
+    if not any(str(row.get("device_id")) == TEST_DEVICE_ID for row in devices):
+        devices.append(
+            {
+                "device_id": TEST_DEVICE_ID,
+                "device_secret_hash": TEST_DEVICE_TOKEN_HASH,
+                "platform": "test",
+            }
+        )
+
     app.dependency_overrides[get_db] = lambda: mock_supabase
     app.dependency_overrides[get_gemini_service] = lambda: mock_gemini_service
     with TestClient(app) as test_client:

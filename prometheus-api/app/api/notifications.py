@@ -5,7 +5,7 @@ from supabase import Client
 
 from ..core.db_columns import NOTIFICATION_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     MarkNotificationsReadRequest,
     MarkNotificationsReadResponse,
@@ -25,7 +25,7 @@ async def get_notifications(
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     only_unread: bool = Query(False),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     query = db.table("notifications").select(NOTIFICATION_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
@@ -61,7 +61,7 @@ async def get_notifications(
 @router.post("/read", response_model=MarkNotificationsReadResponse)
 async def mark_notifications_read(
     request: MarkNotificationsReadRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     payload = {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}

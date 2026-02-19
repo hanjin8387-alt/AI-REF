@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     missing = []
     if settings.require_app_token and not settings.app_token:
         missing.append("APP_TOKEN")
+    if settings.is_production_like and not settings.admin_token:
+        missing.append("ADMIN_TOKEN")
     if not settings.supabase_url:
         missing.append("SUPABASE_URL")
     if not settings.supabase_key:

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     require_app_token: bool = True
     app_token: str = ""
+    admin_token: str = ""
     cors_origins: str = "http://localhost:8081,http://localhost:19006,http://localhost:3000"
     allowed_device_ids: str = ""
 

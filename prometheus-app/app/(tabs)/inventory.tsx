@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -20,11 +20,14 @@ import { SkeletonCard } from '@/components/SkeletonCard';
 import { InventoryItem, SortOption, api } from '@/services/api';
 import { fireAndForget } from '@/utils/async';
 import { confirmDeleteItem } from '@/utils/confirmDelete';
+import {
+  STORAGE_GROUPS,
+  normalizeInventoryStorageCategory,
+} from './storage-utils';
+import type { StorageGroup } from './storage-utils';
 
 const PAGE_SIZE = 40;
 const INVENTORY_ROW_HEIGHT = 96;
-const STORAGE_GROUPS = ['냉장', '냉동', '상온', '미분류'] as const;
-type StorageGroup = (typeof STORAGE_GROUPS)[number];
 
 type InventorySection = {
   title: StorageGroup;
@@ -32,17 +35,6 @@ type InventorySection = {
 };
 
 type InventoryFilter = 'all' | StorageGroup | 'expiring';
-
-function normalizeStorageCategory(value?: string): StorageGroup {
-  const normalized = (value || '').trim().toLowerCase().replace(/[_\-\s]/g, '');
-  if (!normalized) return '미분류';
-
-  if (normalized.includes('냉동') || normalized.includes('ëë') || normalized.includes('freezer') || normalized.includes('frozen')) return '냉동';
-  if (normalized.includes('냉장') || normalized.includes('ëì¥') || normalized.includes('fridge') || normalized.includes('refriger')) return '냉장';
-  if (normalized.includes('상온') || normalized.includes('ìì¨') || normalized.includes('실온') || normalized.includes('ambient') || normalized.includes('pantry')) return '상온';
-
-  return '미분류';
-}
 
 function compareInventory(a: InventoryItem, b: InventoryItem, sortBy: SortOption): number {
   if (sortBy === 'name') {
@@ -178,7 +170,7 @@ export default function InventoryScreen() {
     setEditName(item.name);
     setEditQuantity(String(item.quantity));
     setEditUnit(item.unit);
-    setEditCategory(normalizeStorageCategory(item.category));
+    setEditCategory(normalizeInventoryStorageCategory(item.category));
   }, []);
 
   const closeEditModal = useCallback(() => {
@@ -311,7 +303,7 @@ export default function InventoryScreen() {
       미분류: 0,
     };
     for (const item of items) {
-      counts[normalizeStorageCategory(item.category)] += 1;
+      counts[normalizeInventoryStorageCategory(item.category)] += 1;
     }
     return counts;
   }, [items]);
@@ -327,7 +319,7 @@ export default function InventoryScreen() {
         const diffDays = Math.ceil((expiry.getTime() - now) / (1000 * 60 * 60 * 24));
         return diffDays <= 3;
       }
-      return normalizeStorageCategory(item.category) === activeFilter;
+      return normalizeInventoryStorageCategory(item.category) === activeFilter;
     });
 
     const grouped: Record<StorageGroup, InventoryItem[]> = {
@@ -338,7 +330,7 @@ export default function InventoryScreen() {
     };
 
     for (const item of filtered) {
-      grouped[normalizeStorageCategory(item.category)].push(item);
+      grouped[normalizeInventoryStorageCategory(item.category)].push(item);
     }
 
     return STORAGE_GROUPS.filter(group => grouped[group].length > 0).map(group => ({

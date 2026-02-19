@@ -15,31 +15,15 @@ import {
 import Colors from '@/constants/Colors';
 import { RoundButton } from '@/components/RoundButton';
 import { ScanResultPayload, ScanSourceType, api } from '@/services/api';
+import {
+  STORAGE_CATEGORIES,
+  normalizeDisplayUnit,
+  normalizeStorageCategory,
+} from './storage-utils';
+import type { StorageCategory } from './storage-utils';
 
 type ScanState = 'camera' | 'preview' | 'analyzing' | 'result';
-type StorageCategory = '냉장' | '냉동' | '상온';
 type ScanMode = 'ingredient' | 'receipt';
-
-const STORAGE_CATEGORIES: StorageCategory[] = ['냉장', '냉동', '상온'];
-
-function normalizeDisplayUnit(value?: string): string {
-  const unit = (value || '').trim();
-  if (!unit) return '개';
-  if (unit.toLowerCase() === 'unit') return '개';
-  return unit;
-}
-
-function normalizeStorageCategory(value?: string, fallbackName?: string): StorageCategory {
-  const normalized = (value || '').trim().toLowerCase().replace(/[_\-\s]/g, '');
-  if (normalized.includes('냉동') || normalized.includes('freezer') || normalized.includes('frozen')) return '냉동';
-  if (normalized.includes('냉장') || normalized.includes('fridge') || normalized.includes('refriger')) return '냉장';
-  if (normalized.includes('상온') || normalized.includes('실온') || normalized.includes('ambient') || normalized.includes('pantry')) return '상온';
-
-  const byName = (fallbackName || '').toLowerCase();
-  if (/(냉동|아이스|ice|frozen|만두|피자)/.test(byName)) return '냉동';
-  if (/(우유|치즈|요거트|계란|두부|고기|생선|milk|egg|cheese|yogurt|tofu)/.test(byName)) return '냉장';
-  return '상온';
-}
 
 function toFixedQuantity(value: number): number {
   return Math.max(0.01, Math.round(value * 100) / 100);
@@ -54,7 +38,7 @@ function toIsoDateFromNow(days?: number): string | undefined {
 
 async function promptWebImage(capture: boolean): Promise<File | null> {
   if (typeof document === 'undefined') {
-    throw new Error('웹 파일 선택기를 사용할 수 없어요.');
+    throw new Error('???뚯씪 ?좏깮湲곕? ?ъ슜?????놁뼱??');
   }
 
   return new Promise(resolve => {
@@ -85,8 +69,8 @@ export default function ScanScreen() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeProgressLabel, setAnalyzeProgressLabel] = useState('');
-  const [bulkCategory, setBulkCategory] = useState<StorageCategory>('상온');
-  const [bulkUnit, setBulkUnit] = useState('개');
+  const [bulkCategory, setBulkCategory] = useState<StorageCategory>('?곸삩');
+  const [bulkUnit, setBulkUnit] = useState('媛?);
   const [bulkMultiplier, setBulkMultiplier] = useState('1');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
@@ -143,8 +127,8 @@ export default function ScanScreen() {
       setAnalyzeError(null);
       setScanState('preview');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '이미지를 선택하지 못했어요.';
-      Alert.alert('선택 실패', message);
+      const message = error instanceof Error ? error.message : '?대?吏瑜??좏깮?섏? 紐삵뻽?댁슂.';
+      Alert.alert('?좏깮 ?ㅽ뙣', message);
     }
   };
 
@@ -168,7 +152,7 @@ export default function ScanScreen() {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    return { error: '분석 시간이 길어지고 있어요. 다시 시도해 주세요.' };
+    return { error: '遺꾩꽍 ?쒓컙??湲몄뼱吏怨??덉뼱?? ?ㅼ떆 ?쒕룄??二쇱꽭??' };
   };
 
   const analyzeScan = async () => {
@@ -177,50 +161,50 @@ export default function ScanScreen() {
     setScanState('analyzing');
     setAnalyzeError(null);
     setAnalyzeProgress(0.08);
-    setAnalyzeProgressLabel('이미지를 준비하고 있어요...');
+    setAnalyzeProgressLabel('?대?吏瑜?以鍮꾪븯怨??덉뼱??..');
 
     try {
       setAnalyzeProgress(0.32);
-      setAnalyzeProgressLabel('이미지를 업로드하고 있어요...');
+      setAnalyzeProgressLabel('?대?吏瑜??낅줈?쒗븯怨??덉뼱??..');
       const uploadResult = await api.uploadScan(capturedImage, sourceType);
       if (uploadResult.error || !uploadResult.data) {
-        const message = uploadResult.error || '업로드에 실패했어요.';
+        const message = uploadResult.error || '?낅줈?쒖뿉 ?ㅽ뙣?덉뼱??';
         setAnalyzeProgress(0);
         setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
-        Alert.alert('스캔 실패', message);
+        Alert.alert('?ㅼ틪 ?ㅽ뙣', message);
         return;
       }
 
       setAnalyzeProgress(0.55);
-      setAnalyzeProgressLabel('AI가 이미지를 분석하고 있어요...');
+      setAnalyzeProgressLabel('AI媛 ?대?吏瑜?遺꾩꽍?섍퀬 ?덉뼱??..');
       const resultResponse = await pollScanResult(uploadResult.data.scan_id, 45, (attempt, total, status) => {
         const normalized = Math.min(0.95, 0.55 + (attempt / total) * 0.4);
         setAnalyzeProgress(normalized);
         if (status === 'processing') {
-          setAnalyzeProgressLabel('재료를 인식하고 있어요...');
+          setAnalyzeProgressLabel('?щ즺瑜??몄떇?섍퀬 ?덉뼱??..');
         } else {
-          setAnalyzeProgressLabel('결과를 정리하고 있어요...');
+          setAnalyzeProgressLabel('寃곌낵瑜??뺣━?섍퀬 ?덉뼱??..');
         }
       });
       if (resultResponse.error || !resultResponse.data) {
-        const message = resultResponse.error || '분석에 실패했어요.';
+        const message = resultResponse.error || '遺꾩꽍???ㅽ뙣?덉뼱??';
         setAnalyzeProgress(0);
         setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
-        Alert.alert('분석 실패', message);
+        Alert.alert('遺꾩꽍 ?ㅽ뙣', message);
         return;
       }
 
       if (resultResponse.data.status === 'failed') {
-        const message = resultResponse.data.error_message || '이미지 분석에 실패했어요.';
+        const message = resultResponse.data.error_message || '?대?吏 遺꾩꽍???ㅽ뙣?덉뼱??';
         setAnalyzeProgress(0);
         setAnalyzeProgressLabel('');
         setAnalyzeError(message);
         setScanState('preview');
-        Alert.alert('분석 실패', message);
+        Alert.alert('遺꾩꽍 ?ㅽ뙣', message);
         return;
       }
 
@@ -231,18 +215,18 @@ export default function ScanScreen() {
       }));
 
       setScanResult({ ...resultResponse.data, items: normalizedItems });
-      setBulkUnit('개');
-      setBulkCategory('상온');
+      setBulkUnit('媛?);
+      setBulkCategory('?곸삩');
       setBulkMultiplier('1');
       setAnalyzeProgress(1);
-      setAnalyzeProgressLabel('분석 완료! 결과를 표시해요...');
+      setAnalyzeProgressLabel('遺꾩꽍 ?꾨즺! 寃곌낵瑜??쒖떆?댁슂...');
       setScanState('result');
     } catch {
       setAnalyzeProgress(0);
       setAnalyzeProgressLabel('');
-      setAnalyzeError('스캔 중 오류가 발생했어요.');
+      setAnalyzeError('?ㅼ틪 以??ㅻ쪟媛 諛쒖깮?덉뼱??');
       setScanState('preview');
-      Alert.alert('오류', '스캔 중 예기치 못한 오류가 발생했어요.');
+      Alert.alert('?ㅻ쪟', '?ㅼ틪 以??덇린移?紐삵븳 ?ㅻ쪟媛 諛쒖깮?덉뼱??');
     }
   };
 
@@ -268,7 +252,7 @@ export default function ScanScreen() {
     const multiplier = Number(bulkMultiplier);
     if (!scanResult) return;
     if (Number.isNaN(multiplier) || multiplier <= 0) {
-      Alert.alert('입력 오류', '수량 배율은 0보다 큰 숫자여야 해요.');
+      Alert.alert('?낅젰 ?ㅻ쪟', '?섎웾 諛곗쑉? 0蹂대떎 ???レ옄?ъ빞 ?댁슂.');
       return;
     }
 
@@ -301,14 +285,14 @@ export default function ScanScreen() {
       );
 
       if (result.data?.success) {
-        Alert.alert('저장 완료', `${result.data.added_count}개 추가, ${result.data.updated_count}개 업데이트했어요.`, [
-          { text: '확인', onPress: () => resetScan() },
+        Alert.alert('????꾨즺', `${result.data.added_count}媛?異붽?, ${result.data.updated_count}媛??낅뜲?댄듃?덉뼱??`, [
+          { text: '?뺤씤', onPress: () => resetScan() },
         ]);
       } else {
-        Alert.alert('저장 실패', result.error || '인벤토리 저장에 실패했어요.');
+        Alert.alert('????ㅽ뙣', result.error || '?몃깽?좊━ ??μ뿉 ?ㅽ뙣?덉뼱??');
       }
     } catch {
-      Alert.alert('오류', '인벤토리 저장에 실패했어요.');
+      Alert.alert('?ㅻ쪟', '?몃깽?좊━ ??μ뿉 ?ㅽ뙣?덉뼱??');
     } finally {
       setSavingInventory(false);
     }
@@ -324,7 +308,7 @@ export default function ScanScreen() {
   const lookupBarcode = async () => {
     const code = barcodeInput.trim();
     if (!code) {
-      Alert.alert('입력 오류', '바코드를 입력해 주세요.');
+      Alert.alert('?낅젰 ?ㅻ쪟', '諛붿퐫?쒕? ?낅젰??二쇱꽭??');
       return;
     }
 
@@ -333,7 +317,7 @@ export default function ScanScreen() {
       const result = await api.lookupBarcode(code);
       if (!result.data?.found || !result.data.product) {
         setBarcodeProduct(null);
-        Alert.alert('조회 결과', '해당 바코드 상품을 찾지 못했어요.');
+        Alert.alert('議고쉶 寃곌낵', '?대떦 諛붿퐫???곹뭹??李얠? 紐삵뻽?댁슂.');
         return;
       }
       setBarcodeProduct(result.data.product);
@@ -352,18 +336,18 @@ export default function ScanScreen() {
         {
           name: barcodeProduct.name,
           quantity: 1,
-          unit: '개',
+          unit: '媛?,
           category: storageCategory,
           expiry_date: toIsoDateFromNow(barcodeProduct.suggested_expiry_days),
         },
       ]);
 
       if (!result.data?.success) {
-        Alert.alert('추가 실패', result.error || '바코드 상품을 인벤토리에 추가하지 못했어요.');
+        Alert.alert('異붽? ?ㅽ뙣', result.error || '諛붿퐫???곹뭹???몃깽?좊━??異붽??섏? 紐삵뻽?댁슂.');
         return;
       }
 
-      Alert.alert('추가 완료', `${barcodeProduct.name} 항목을 인벤토리에 반영했어요.`);
+      Alert.alert('異붽? ?꾨즺', `${barcodeProduct.name} ??ぉ???몃깽?좊━??諛섏쁺?덉뼱??`);
       setBarcodeInput('');
       setBarcodeProduct(null);
     } finally {
@@ -379,21 +363,21 @@ export default function ScanScreen() {
           {item.quantity} {normalizeDisplayUnit(item.unit)}
         </Text>
         {typeof item.total_price === 'number' ? (
-          <Text style={styles.priceText}>예상 가격: {Math.round(item.total_price).toLocaleString()}원</Text>
+          <Text style={styles.priceText}>?덉긽 媛寃? {Math.round(item.total_price).toLocaleString()}??/Text>
         ) : null}
 
         <View style={styles.qtyControlRow}>
           <TouchableOpacity
             style={styles.qtyButton}
             onPress={() => updateItemQuantity(index, item.quantity - 1)}
-            accessibilityLabel={`${item.name} 수량 감소`}
+            accessibilityLabel={`${item.name} ?섎웾 媛먯냼`}
           >
             <Text style={styles.qtyButtonText}>-</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.qtyButton}
             onPress={() => updateItemQuantity(index, item.quantity + 1)}
-            accessibilityLabel={`${item.name} 수량 증가`}
+            accessibilityLabel={`${item.name} ?섎웾 利앷?`}
           >
             <Text style={styles.qtyButtonText}>+</Text>
           </TouchableOpacity>
@@ -401,13 +385,13 @@ export default function ScanScreen() {
 
         <View style={styles.categorySelectorRow}>
           {STORAGE_CATEGORIES.map(category => {
-            const isActive = (item.category || '상온') === category;
+            const isActive = (item.category || '?곸삩') === category;
             return (
               <TouchableOpacity
                 key={`${item.name}-${index}-${category}`}
                 style={[styles.categoryChip, isActive && styles.categoryChipActive]}
                 onPress={() => updateItemCategory(index, category)}
-                accessibilityLabel={`${item.name} 보관 분류 ${category} 선택`}
+                accessibilityLabel={`${item.name} 蹂닿? 遺꾨쪟 ${category} ?좏깮`}
               >
                 <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>{category}</Text>
               </TouchableOpacity>
@@ -427,40 +411,40 @@ export default function ScanScreen() {
         <StatusBar barStyle="dark-content" />
 
         <View style={styles.webIntro}>
-          <Text style={styles.webTitle}>스캔</Text>
-          <Text style={styles.webSubtitle}>재료 또는 영수증 사진을 촬영하거나 선택해 주세요.</Text>
+          <Text style={styles.webTitle}>?ㅼ틪</Text>
+          <Text style={styles.webSubtitle}>?щ즺 ?먮뒗 ?곸닔利??ъ쭊??珥ъ쁺?섍굅???좏깮??二쇱꽭??</Text>
 
           <View style={styles.scanTypeContainer}>
             <TouchableOpacity
               style={[styles.scanTypeButton, scanMode === 'ingredient' && styles.scanTypeButtonActive]}
               onPress={() => setScanMode('ingredient')}
-              accessibilityLabel="재료 스캔 모드 선택"
+              accessibilityLabel="?щ즺 ?ㅼ틪 紐⑤뱶 ?좏깮"
             >
-              <Text style={[styles.scanTypeText, scanMode === 'ingredient' && styles.scanTypeTextActive]}>재료</Text>
+              <Text style={[styles.scanTypeText, scanMode === 'ingredient' && styles.scanTypeTextActive]}>?щ즺</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.scanTypeButton, scanMode === 'receipt' && styles.scanTypeButtonActive]}
               onPress={() => setScanMode('receipt')}
-              accessibilityLabel="영수증 스캔 모드 선택"
+              accessibilityLabel="?곸닔利??ㅼ틪 紐⑤뱶 ?좏깮"
             >
-              <Text style={[styles.scanTypeText, scanMode === 'receipt' && styles.scanTypeTextActive]}>영수증</Text>
+              <Text style={[styles.scanTypeText, scanMode === 'receipt' && styles.scanTypeTextActive]}>?곸닔利?/Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.webButtonStack}>
-            <RoundButton title="카메라로 촬영" onPress={() => pickImage(true)} size="large" />
+            <RoundButton title="移대찓?쇰줈 珥ъ쁺" onPress={() => pickImage(true)} size="large" />
             <View style={{ height: 12 }} />
-            <RoundButton title="갤러리에서 선택" onPress={() => pickImage(false)} size="large" variant="outline" />
+            <RoundButton title="媛ㅻ윭由ъ뿉???좏깮" onPress={() => pickImage(false)} size="large" variant="outline" />
           </View>
         </View>
 
         <View style={styles.barcodePanel}>
-          <Text style={styles.barcodeTitle}>바코드 빠른 추가</Text>
+          <Text style={styles.barcodeTitle}>諛붿퐫??鍮좊Ⅸ 異붽?</Text>
           <View style={styles.barcodeRow}>
             <TextInput
               value={barcodeInput}
               onChangeText={setBarcodeInput}
-              placeholder="바코드 번호"
+              placeholder="諛붿퐫??踰덊샇"
               placeholderTextColor={Colors.gray500}
               style={styles.barcodeInput}
               keyboardType="number-pad"
@@ -469,25 +453,25 @@ export default function ScanScreen() {
               style={styles.barcodeLookupButton}
               onPress={lookupBarcode}
               disabled={barcodeLoading}
-              accessibilityLabel="바코드 조회"
+              accessibilityLabel="諛붿퐫??議고쉶"
             >
-              <Text style={styles.barcodeLookupButtonText}>{barcodeLoading ? '조회 중...' : '조회'}</Text>
+              <Text style={styles.barcodeLookupButtonText}>{barcodeLoading ? '議고쉶 以?..' : '議고쉶'}</Text>
             </TouchableOpacity>
           </View>
           {barcodeProduct ? (
             <View style={styles.barcodeResultBox}>
               <Text style={styles.barcodeResultName}>{barcodeProduct.name}</Text>
               <Text style={styles.barcodeResultMeta}>
-                {barcodeProduct.category || '카테고리 없음'}
-                {barcodeProduct.suggested_expiry_days ? ` / 권장 유통 ${barcodeProduct.suggested_expiry_days}일` : ''}
+                {barcodeProduct.category || '移댄뀒怨좊━ ?놁쓬'}
+                {barcodeProduct.suggested_expiry_days ? ` / 沅뚯옣 ?좏넻 ${barcodeProduct.suggested_expiry_days}?? : ''}
               </Text>
               <TouchableOpacity
                 style={styles.barcodeAddButton}
                 onPress={addBarcodeProductToInventory}
                 disabled={addingBarcodeItem}
-                accessibilityLabel={`${barcodeProduct.name} 인벤토리에 1개 추가`}
+                accessibilityLabel={`${barcodeProduct.name} ?몃깽?좊━??1媛?異붽?`}
               >
-                <Text style={styles.barcodeAddButtonText}>{addingBarcodeItem ? '추가 중...' : '인벤토리에 1개 추가'}</Text>
+                <Text style={styles.barcodeAddButtonText}>{addingBarcodeItem ? '異붽? 以?..' : '?몃깽?좊━??1媛?異붽?'}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -501,13 +485,13 @@ export default function ScanScreen() {
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={resetScan} accessibilityLabel="다시 촬영">
-          <Text style={styles.backButton}>다시 촬영</Text>
+        <TouchableOpacity onPress={resetScan} accessibilityLabel="?ㅼ떆 珥ъ쁺">
+          <Text style={styles.backButton}>?ㅼ떆 珥ъ쁺</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
-          {scanState === 'preview' && '미리보기'}
-          {scanState === 'analyzing' && '분석 중...'}
-          {scanState === 'result' && '결과'}
+          {scanState === 'preview' && '誘몃━蹂닿린'}
+          {scanState === 'analyzing' && '遺꾩꽍 以?..'}
+          {scanState === 'result' && '寃곌낵'}
         </Text>
         <View style={{ width: 70 }} />
       </View>
@@ -517,7 +501,7 @@ export default function ScanScreen() {
         {scanState === 'analyzing' ? (
           <View style={styles.analyzingOverlay}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.analyzingText}>{analyzeProgressLabel || 'AI가 이미지를 분석하고 있어요...'}</Text>
+            <Text style={styles.analyzingText}>{analyzeProgressLabel || 'AI媛 ?대?吏瑜?遺꾩꽍?섍퀬 ?덉뼱??..'}</Text>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${Math.round(analyzeProgress * 100)}%` }]} />
             </View>
@@ -529,25 +513,25 @@ export default function ScanScreen() {
       {analyzeError && scanState === 'preview' ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{analyzeError}</Text>
-          <TouchableOpacity style={styles.errorRetryButton} onPress={analyzeScan} accessibilityLabel="스캔 분석 다시 시도">
-            <Text style={styles.errorRetryText}>다시 시도</Text>
+          <TouchableOpacity style={styles.errorRetryButton} onPress={analyzeScan} accessibilityLabel="?ㅼ틪 遺꾩꽍 ?ㅼ떆 ?쒕룄">
+            <Text style={styles.errorRetryText}>?ㅼ떆 ?쒕룄</Text>
           </TouchableOpacity>
         </View>
       ) : null}
 
       {scanState === 'result' && scanResult ? (
         <View style={styles.resultContainer}>
-          <Text style={styles.resultTitle}>감지된 항목 ({scanResult.items.length})</Text>
+          <Text style={styles.resultTitle}>媛먯?????ぉ ({scanResult.items.length})</Text>
 
           <View style={styles.bulkPanel}>
-            <Text style={styles.bulkTitle}>일괄 수정</Text>
+            <Text style={styles.bulkTitle}>?쇨큵 ?섏젙</Text>
             <View style={styles.bulkCategoryRow}>
               {STORAGE_CATEGORIES.map(category => (
                 <TouchableOpacity
                   key={`bulk-${category}`}
                   style={[styles.categoryChip, bulkCategory === category && styles.categoryChipActive]}
                   onPress={() => setBulkCategory(category)}
-                  accessibilityLabel={`일괄 보관 분류 ${category} 선택`}
+                  accessibilityLabel={`?쇨큵 蹂닿? 遺꾨쪟 ${category} ?좏깮`}
                 >
                   <Text style={[styles.categoryChipText, bulkCategory === category && styles.categoryChipTextActive]}>{category}</Text>
                 </TouchableOpacity>
@@ -557,30 +541,30 @@ export default function ScanScreen() {
               <TextInput
                 value={bulkUnit}
                 onChangeText={setBulkUnit}
-                placeholder="단위"
+                placeholder="?⑥쐞"
                 style={styles.bulkInput}
                 placeholderTextColor={Colors.gray500}
               />
               <TextInput
                 value={bulkMultiplier}
                 onChangeText={setBulkMultiplier}
-                placeholder="수량 배율"
+                placeholder="?섎웾 諛곗쑉"
                 style={styles.bulkInput}
                 keyboardType="decimal-pad"
                 placeholderTextColor={Colors.gray500}
               />
-              <TouchableOpacity style={styles.bulkApplyButton} onPress={applyBulkEdit} accessibilityLabel="일괄 수정 적용">
-                <Text style={styles.bulkApplyText}>전체 적용</Text>
+              <TouchableOpacity style={styles.bulkApplyButton} onPress={applyBulkEdit} accessibilityLabel="?쇨큵 ?섏젙 ?곸슜">
+                <Text style={styles.bulkApplyText}>?꾩껜 ?곸슜</Text>
               </TouchableOpacity>
             </View>
           </View>
 
           {scanResult.receipt_store || scanResult.receipt_purchased_at ? (
             <View style={styles.receiptMetaBox}>
-              <Text style={styles.receiptMetaTitle}>영수증 메타</Text>
-              {scanResult.receipt_store ? <Text style={styles.receiptMetaText}>매장: {scanResult.receipt_store}</Text> : null}
+              <Text style={styles.receiptMetaTitle}>?곸닔利?硫뷀?</Text>
+              {scanResult.receipt_store ? <Text style={styles.receiptMetaText}>留ㅼ옣: {scanResult.receipt_store}</Text> : null}
               {scanResult.receipt_purchased_at ? (
-                <Text style={styles.receiptMetaText}>구매일: {scanResult.receipt_purchased_at}</Text>
+                <Text style={styles.receiptMetaText}>援щℓ?? {scanResult.receipt_purchased_at}</Text>
               ) : null}
             </View>
           ) : null}
@@ -590,7 +574,7 @@ export default function ScanScreen() {
 
             {scanResult.raw_text ? (
               <View style={styles.rawTextBox}>
-                <Text style={styles.rawTextTitle}>영수증 텍스트</Text>
+                <Text style={styles.rawTextTitle}>?곸닔利??띿뒪??/Text>
                 <Text style={styles.rawText}>{scanResult.raw_text}</Text>
               </View>
             ) : null}
@@ -599,12 +583,12 @@ export default function ScanScreen() {
       ) : null}
 
       <View style={styles.actionContainer}>
-        {scanState === 'preview' ? <RoundButton title="분석하기" onPress={analyzeScan} size="large" /> : null}
+        {scanState === 'preview' ? <RoundButton title="遺꾩꽍?섍린" onPress={analyzeScan} size="large" /> : null}
         {scanState === 'result' ? (
           <>
-            <RoundButton title="인벤토리에 저장" onPress={addToInventory} size="large" loading={savingInventory} />
+            <RoundButton title="?몃깽?좊━????? onPress={addToInventory} size="large" loading={savingInventory} />
             <View style={styles.actionSpacer} />
-            <RoundButton title="다시 스캔" onPress={resetScan} size="small" variant="outline" />
+            <RoundButton title="?ㅼ떆 ?ㅼ틪" onPress={resetScan} size="small" variant="outline" />
           </>
         ) : null}
       </View>

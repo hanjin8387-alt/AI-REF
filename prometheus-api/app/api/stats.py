@@ -8,7 +8,7 @@ from supabase import Client
 
 from ..core.db_columns import PRICE_HISTORY_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     CookingStats,
     InventoryStats,
@@ -46,7 +46,7 @@ def _is_missing_table_error(exc: Exception, table_name: str) -> bool:
 @router.get("/summary", response_model=StatsSummaryResponse)
 async def get_stats_summary(
     period: str = Query("month", description="week | month | all"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     start = _period_start(period)
@@ -179,7 +179,7 @@ async def get_price_history(
     days: int = Query(90, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     start = datetime.now(timezone.utc) - timedelta(days=days)
@@ -203,3 +203,4 @@ async def get_price_history(
             logger.warning("price_history table missing during stats query; returning empty list")
             return PriceHistoryResponse(items=[], total_count=0)
         raise
+

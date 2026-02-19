@@ -11,8 +11,9 @@ class TestHttpClient extends HttpClient {
 }
 
 function markInitialized(client: TestHttpClient) {
-  (client as unknown as { initialized: boolean; deviceId: string }).initialized = true;
-  (client as unknown as { initialized: boolean; deviceId: string }).deviceId = 'device-1234';
+  (client as unknown as { initialized: boolean; deviceId: string; deviceToken: string }).initialized = true;
+  (client as unknown as { initialized: boolean; deviceId: string; deviceToken: string }).deviceId = 'device-1234';
+  (client as unknown as { initialized: boolean; deviceId: string; deviceToken: string }).deviceToken = 'test-device-token';
 }
 
 describe('http-client', () => {

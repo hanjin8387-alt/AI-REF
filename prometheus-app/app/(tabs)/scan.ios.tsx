@@ -17,31 +17,15 @@ import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/Colors';
 import { RoundButton } from '@/components/RoundButton';
 import { ScanResultPayload, ScanSourceType, api } from '@/services/api';
+import {
+  STORAGE_CATEGORIES,
+  normalizeDisplayUnit,
+  normalizeStorageCategory,
+} from './storage-utils';
+import type { StorageCategory } from './storage-utils';
 
 type ScanState = 'camera' | 'preview' | 'analyzing' | 'result';
-type StorageCategory = '냉장' | '냉동' | '상온';
 type ScanMode = 'ingredient' | 'receipt';
-
-const STORAGE_CATEGORIES: StorageCategory[] = ['냉장', '냉동', '상온'];
-
-function normalizeDisplayUnit(value?: string): string {
-  const unit = (value || '').trim();
-  if (!unit) return '개';
-  if (unit.toLowerCase() === 'unit') return '개';
-  return unit;
-}
-
-function normalizeStorageCategory(value?: string, fallbackName?: string): StorageCategory {
-  const normalized = (value || '').trim().toLowerCase().replace(/[_\-\s]/g, '');
-  if (normalized.includes('냉동') || normalized.includes('freezer') || normalized.includes('frozen')) return '냉동';
-  if (normalized.includes('냉장') || normalized.includes('fridge') || normalized.includes('refriger')) return '냉장';
-  if (normalized.includes('상온') || normalized.includes('실온') || normalized.includes('ambient') || normalized.includes('pantry')) return '상온';
-
-  const byName = (fallbackName || '').toLowerCase();
-  if (/(냉동|아이스|ice|frozen|만두|피자)/.test(byName)) return '냉동';
-  if (/(우유|치즈|요거트|계란|두부|고기|생선|milk|egg|cheese|yogurt|tofu)/.test(byName)) return '냉장';
-  return '상온';
-}
 
 function toFixedQuantity(value: number): number {
   return Math.max(0.01, Math.round(value * 100) / 100);

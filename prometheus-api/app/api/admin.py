@@ -82,9 +82,9 @@ def _fetch_push_tokens(
 def _require_admin_token(
     x_admin_token: str = Header(..., alias="X-Admin-Token"),
 ) -> None:
-    """Validate admin token (reuses app_token for simplicity)."""
+    """Validate admin token for scheduled/admin endpoints."""
     settings = get_settings()
-    token = settings.app_token
+    token = settings.admin_token
     if not token or not secrets.compare_digest(x_admin_token, token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

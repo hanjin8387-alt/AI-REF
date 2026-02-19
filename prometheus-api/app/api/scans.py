@@ -13,7 +13,7 @@ from supabase import Client
 from ..core.config import get_settings
 from ..core.db_columns import SCAN_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     BarcodeProductInfo,
     BarcodeResponse,
@@ -221,7 +221,7 @@ async def upload_scan(
     request: Request,
     file: UploadFile = File(...),
     source_type: ScanSourceType = ScanSourceType.CAMERA,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
 ):
@@ -323,7 +323,7 @@ async def upload_scan(
 @router.get("/{scan_id}/result", response_model=ScanResultResponse)
 async def get_scan_result(
     scan_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     result = (
@@ -359,7 +359,7 @@ async def get_scan_result(
 async def lookup_barcode(
     request: Request,
     code: str = Query(..., min_length=4, max_length=20, description="Barcode string (EAN-13, etc.)"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
 ):
     """Look up a product by barcode using Open Food Facts API."""
     settings = get_settings()

@@ -15,7 +15,12 @@ from ..core.db_columns import (
 )
 from ..core.config import get_settings
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import (
+    get_device_id,
+    issue_device_token,
+    require_app_token,
+    require_device_auth,
+)
 from ..schemas.schemas import (
     BootstrapResponse,
     BackupExportResponse,
@@ -89,12 +94,14 @@ async def register_device(
         )
 
     try:
+        device_token, device_secret_hash = issue_device_token()
         db.table("devices").upsert(
             {
                 "device_id": request.device_id,
                 "push_token": request.push_token,
                 "platform": request.platform,
                 "app_version": request.app_version,
+                "device_secret_hash": device_secret_hash,
             },
             on_conflict="device_id",
         ).execute()
@@ -102,6 +109,7 @@ async def register_device(
             success=True,
             device_id=request.device_id,
             message="Device registered",
+            device_token=device_token,
         )
     except Exception as exc:
         logger.exception("device registration failed device_id=%s", request.device_id)
@@ -113,7 +121,7 @@ async def register_device(
 
 @router.get("/backup/export", response_model=BackupExportResponse)
 async def export_backup(
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     data: dict[str, list[dict]] = {}
@@ -153,7 +161,7 @@ def _safe_rows(payload: dict, table: str) -> list[dict]:
 @router.post("/backup/restore", response_model=BackupRestoreResponse)
 async def restore_backup(
     request: BackupRestoreRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     mode = (request.mode or "merge").strip().lower()
@@ -237,3 +245,4 @@ async def restore_backup(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to restore backup.",
         ) from exc
+

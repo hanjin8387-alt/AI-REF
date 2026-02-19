@@ -7,6 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS devices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     device_id VARCHAR(255) UNIQUE NOT NULL,
+    device_secret_hash TEXT,
     push_token TEXT,
     platform VARCHAR(20) DEFAULT 'unknown',
     app_version VARCHAR(20),
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS recipes (
 );
 
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS device_secret_hash TEXT;
 
 -- Favorites (supports generated non-UUID recipe IDs)
 CREATE TABLE IF NOT EXISTS favorite_recipes (
@@ -156,23 +158,43 @@ CREATE TABLE IF NOT EXISTS price_history (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Async recommendation jobs
+CREATE TABLE IF NOT EXISTS recipe_recommendation_jobs (
+    job_id VARCHAR(64) PRIMARY KEY,
+    device_id VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    recipes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    total_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT recipe_recommendation_jobs_status_check
+        CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_device_created ON inventory_logs(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_device_action ON inventory_logs(device_id, action);
 CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory(name);
 CREATE INDEX IF NOT EXISTS idx_inventory_expiry ON inventory(expiry_date);
 CREATE INDEX IF NOT EXISTS idx_inventory_device ON inventory(device_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_device_expiry ON inventory(device_id, expiry_date);
+CREATE INDEX IF NOT EXISTS idx_inventory_device_updated ON inventory(device_id, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_device_name_unique ON inventory(device_id, name);
 
 CREATE INDEX IF NOT EXISTS idx_scans_device ON scans(device_id);
 CREATE INDEX IF NOT EXISTS idx_cooking_history_device ON cooking_history(device_id);
+CREATE INDEX IF NOT EXISTS idx_cooking_history_device_cooked ON cooking_history(device_id, cooked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_favorite_recipes_device_created ON favorite_recipes(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_device_created ON notifications(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_device_unread ON notifications(device_id, is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shopping_items_device_created ON shopping_items(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shopping_items_device_status ON shopping_items(device_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shopping_items_device_updated ON shopping_items(device_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_price_history_device_created ON price_history(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_price_history_device_item ON price_history(device_id, item_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recipe_recommendation_jobs_device_updated
+    ON recipe_recommendation_jobs(device_id, updated_at DESC);
 
 -- Trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -208,6 +230,11 @@ CREATE TRIGGER update_shopping_items_updated_at
 BEFORE UPDATE ON shopping_items
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_recipe_recommendation_jobs_updated_at ON recipe_recommendation_jobs;
+CREATE TRIGGER update_recipe_recommendation_jobs_updated_at
+BEFORE UPDATE ON recipe_recommendation_jobs
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- RLS
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scans ENABLE ROW LEVEL SECURITY;
@@ -219,6 +246,7 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shopping_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE price_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recipe_recommendation_jobs ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Service role full access" ON devices;
 DROP POLICY IF EXISTS "Service role full access" ON scans;
@@ -230,6 +258,7 @@ DROP POLICY IF EXISTS "Service role full access" ON notifications;
 DROP POLICY IF EXISTS "Service role full access" ON shopping_items;
 DROP POLICY IF EXISTS "Service role full access" ON inventory_logs;
 DROP POLICY IF EXISTS "Service role full access" ON price_history;
+DROP POLICY IF EXISTS "Service role full access" ON recipe_recommendation_jobs;
 
 CREATE POLICY "Service role full access" ON devices
     FOR ALL TO service_role USING (true) WITH CHECK (true);
@@ -251,8 +280,10 @@ CREATE POLICY "Service role full access" ON inventory_logs
     FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON price_history
     FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access" ON recipe_recommendation_jobs
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-REVOKE ALL ON devices, scans, inventory, recipes, favorite_recipes, cooking_history, notifications, shopping_items, inventory_logs, price_history
+REVOKE ALL ON devices, scans, inventory, recipes, favorite_recipes, cooking_history, notifications, shopping_items, inventory_logs, price_history, recipe_recommendation_jobs
 FROM anon, authenticated;
 
 -- Transactional cook completion: inventory updates/deletes + history insert

@@ -7,7 +7,7 @@ from supabase import Client
 
 from ..core.db_columns import INVENTORY_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     BulkInventoryRequest,
     BulkInventoryResponse,
@@ -39,7 +39,7 @@ async def get_inventory(
     limit: int = Query(30, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     updated_since: Optional[datetime] = Query(None, description="Return rows updated since this timestamp"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     query = db.table("inventory").select(INVENTORY_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
@@ -83,7 +83,7 @@ async def get_inventory(
 @router.post("/bulk", response_model=BulkInventoryResponse)
 async def bulk_add_inventory(
     request: BulkInventoryRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     if not request.items:
@@ -129,7 +129,7 @@ async def bulk_add_inventory(
 async def update_inventory_item(
     item_id: str,
     request: InventoryUpdateRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     existing = (
@@ -194,7 +194,7 @@ async def update_inventory_item(
 @router.delete("/{item_id}", response_model=InventoryDeleteResponse)
 async def delete_inventory_item(
     item_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     existing_result = (
@@ -242,7 +242,7 @@ async def delete_inventory_item(
 @router.post("/restore", response_model=InventoryItem)
 async def restore_inventory_item(
     request: InventoryRestoreRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     name = request.name.strip()

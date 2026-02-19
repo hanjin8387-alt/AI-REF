@@ -5,6 +5,7 @@ def _auth_headers() -> dict[str, str]:
     return {
         "X-App-Token": "test-app-token",
         "X-Device-ID": "device-1234",
+        "X-Device-Token": "test-device-token",
     }
 
 

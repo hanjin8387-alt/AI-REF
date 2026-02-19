@@ -5,8 +5,6 @@ import threading
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
-
 from fastapi import HTTPException, status
 from supabase import Client, create_client
 

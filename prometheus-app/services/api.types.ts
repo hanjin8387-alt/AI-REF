@@ -31,6 +31,7 @@ export type InventoryItem = {
   unit: string;
   expiry_date?: string;
   category?: string;
+  image_url?: string;
   created_at?: string;
   updated_at?: string;
 };

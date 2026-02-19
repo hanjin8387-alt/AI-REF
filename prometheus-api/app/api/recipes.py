@@ -1,8 +1,6 @@
-﻿from datetime import datetime
 import asyncio
 import logging
-from datetime import timedelta, timezone
-from threading import Lock
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -18,7 +16,7 @@ from ..core.db_columns import (
 )
 from ..core.config import get_settings
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     CookCompleteRequest,
     CookCompleteResponse,
@@ -49,8 +47,7 @@ from ..services.recipe_helpers import (
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 RECOMMENDATION_JOB_TTL_SECONDS = 300
-_recommendation_jobs_lock = Lock()
-_recommendation_jobs: dict[str, dict] = {}
+RECOMMENDATION_JOB_TABLE = "recipe_recommendation_jobs"
 
 router = APIRouter(
     prefix="/recipes",
@@ -132,12 +129,49 @@ def _find_best_inventory_match(inventory_rows: list[dict], ingredient_name: str)
     return matched[0]
 
 
-def _prune_recommendation_jobs_locked(now: datetime) -> None:
-    stale_before = now - timedelta(seconds=RECOMMENDATION_JOB_TTL_SECONDS)
-    for job_id in list(_recommendation_jobs.keys()):
-        updated_at = _recommendation_jobs[job_id].get("updated_at")
-        if isinstance(updated_at, datetime) and updated_at < stale_before:
-            del _recommendation_jobs[job_id]
+def _recommendation_job_cleanup(db: Client) -> None:
+    stale_before = (datetime.now(timezone.utc) - timedelta(seconds=RECOMMENDATION_JOB_TTL_SECONDS)).isoformat()
+    try:
+        db.table(RECOMMENDATION_JOB_TABLE).delete().lt("updated_at", stale_before).execute()
+    except Exception:
+        logger.warning("recommendation job cleanup failed", exc_info=True)
+
+
+def _recommendation_job_upsert(
+    db: Client,
+    *,
+    job_id: str,
+    device_id: str,
+    status: str,
+    recipes: list[dict] | None = None,
+    total_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "job_id": job_id,
+        "device_id": device_id,
+        "status": status,
+        "recipes": recipes or [],
+        "total_count": int(total_count or 0),
+        "error": error,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    db.table(RECOMMENDATION_JOB_TABLE).upsert([payload], on_conflict="job_id").execute()
+
+
+def _parse_recommendation_job_recipes(raw_recipes: object) -> list[Recipe]:
+    if not isinstance(raw_recipes, list):
+        return []
+
+    parsed: list[Recipe] = []
+    for item in raw_recipes:
+        if not isinstance(item, dict):
+            continue
+        try:
+            parsed.append(Recipe(**item))
+        except Exception:
+            continue
+    return parsed
 
 
 async def _build_recommendation_response(
@@ -196,7 +230,7 @@ async def get_recommendations(
     request: Request,
     limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
     force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
@@ -217,32 +251,27 @@ async def create_recommendation_job(
     request: Request,
     limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
     force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    now = datetime.now(timezone.utc)
     job_id = str(uuid4())
-    with _recommendation_jobs_lock:
-        _prune_recommendation_jobs_locked(now)
-        _recommendation_jobs[job_id] = {
-            "job_id": job_id,
-            "status": "pending",
-            "device_id": device_id,
-            "recipes": [],
-            "total_count": 0,
-            "error": None,
-            "updated_at": now,
-        }
+    _recommendation_job_cleanup(db)
+    _recommendation_job_upsert(
+        db,
+        job_id=job_id,
+        device_id=device_id,
+        status="pending",
+    )
 
     async def _run_job() -> None:
-        with _recommendation_jobs_lock:
-            job = _recommendation_jobs.get(job_id)
-            if not job:
-                return
-            job["status"] = "processing"
-            job["updated_at"] = datetime.now(timezone.utc)
+        _recommendation_job_upsert(
+            db,
+            job_id=job_id,
+            device_id=device_id,
+            status="processing",
+        )
 
         try:
             response = await _build_recommendation_response(
@@ -253,23 +282,23 @@ async def create_recommendation_job(
                 gemini=gemini,
                 recipe_cache=recipe_cache,
             )
-            with _recommendation_jobs_lock:
-                job = _recommendation_jobs.get(job_id)
-                if not job:
-                    return
-                job["status"] = "completed"
-                job["recipes"] = response.recipes
-                job["total_count"] = response.total_count
-                job["updated_at"] = datetime.now(timezone.utc)
+            _recommendation_job_upsert(
+                db,
+                job_id=job_id,
+                device_id=device_id,
+                status="completed",
+                recipes=[recipe.model_dump(mode="json") for recipe in response.recipes],
+                total_count=response.total_count,
+            )
         except Exception as exc:
             logger.exception("recipe recommendation job failed job_id=%s device_id=%s", job_id, device_id)
-            with _recommendation_jobs_lock:
-                job = _recommendation_jobs.get(job_id)
-                if not job:
-                    return
-                job["status"] = "failed"
-                job["error"] = str(exc)
-                job["updated_at"] = datetime.now(timezone.utc)
+            _recommendation_job_upsert(
+                db,
+                job_id=job_id,
+                device_id=device_id,
+                status="failed",
+                error=str(exc),
+            )
 
     asyncio.create_task(_run_job())
     return RecommendationJobCreateResponse(job_id=job_id, status="pending")
@@ -278,28 +307,38 @@ async def create_recommendation_job(
 @router.get("/recommendations/jobs/{job_id}", response_model=RecommendationJobStatusResponse)
 async def get_recommendation_job_status(
     job_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
+    db: Client = Depends(get_db),
 ):
-    now = datetime.now(timezone.utc)
-    with _recommendation_jobs_lock:
-        _prune_recommendation_jobs_locked(now)
-        job = _recommendation_jobs.get(job_id)
-        if not job:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation job not found.")
-        if job.get("device_id") != device_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation job not found.")
+    _recommendation_job_cleanup(db)
+    rows = (
+        db.table(RECOMMENDATION_JOB_TABLE)
+        .select("job_id,device_id,status,recipes,total_count,error")
+        .eq("job_id", job_id)
+        .eq("device_id", device_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation job not found.")
 
-        recipes = job.get("recipes") or []
-        if not isinstance(recipes, list):
-            recipes = []
+    row = rows[0]
+    recipes = _parse_recommendation_job_recipes(row.get("recipes"))
+    total_count_raw = row.get("total_count")
+    try:
+        total_count = int(total_count_raw if total_count_raw is not None else len(recipes))
+    except (TypeError, ValueError):
+        total_count = len(recipes)
 
-        return RecommendationJobStatusResponse(
-            job_id=job_id,
-            status=str(job.get("status") or "pending"),
-            recipes=recipes,
-            total_count=int(job.get("total_count") or len(recipes)),
-            error=job.get("error"),
-        )
+    return RecommendationJobStatusResponse(
+        job_id=str(row.get("job_id") or job_id),
+        status=str(row.get("status") or "pending"),
+        recipes=recipes,
+        total_count=total_count,
+        error=str(row.get("error")) if row.get("error") else None,
+    )
 
 
 @router.get("/favorites", response_model=RecipeListResponse)
@@ -307,7 +346,7 @@ async def get_favorite_recipes(
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     updated_since: datetime | None = Query(None, description="Return rows created since this timestamp"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     query = db.table("favorite_recipes").select(FAVORITE_RECIPE_SELECT_COLUMNS, count="exact").eq("device_id", device_id)
@@ -334,7 +373,7 @@ async def get_favorite_recipes(
 async def add_favorite_recipe(
     recipe_id: str,
     request: FavoriteRecipeRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
@@ -369,7 +408,7 @@ async def add_favorite_recipe(
 @router.delete("/{recipe_id}/favorite", response_model=FavoriteToggleResponse)
 async def remove_favorite_recipe(
     recipe_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     db.table("favorite_recipes").delete().eq("device_id", device_id).eq("recipe_id", recipe_id).execute()
@@ -380,7 +419,7 @@ async def remove_favorite_recipe(
 async def get_cooking_history(
     limit: int = Query(20, ge=1, le=100, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     result = (
@@ -407,7 +446,7 @@ async def get_cooking_history(
 @router.get("/history/{history_id}", response_model=CookingHistoryItem)
 async def get_cooking_history_detail(
     history_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     result = (
@@ -426,7 +465,7 @@ async def get_cooking_history_detail(
 @router.get("/{recipe_id}", response_model=Recipe)
 async def get_recipe(
     recipe_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
@@ -442,7 +481,7 @@ async def get_recipe(
 async def complete_cooking(
     recipe_id: str,
     request: CookCompleteRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
@@ -576,4 +615,5 @@ async def complete_cooking(
         message=f"요리를 완료했어요. 재료 {len(deducted_items)}개를 사용했어요.",
         deducted_items=deducted_items,
     )
+
 

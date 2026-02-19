@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
@@ -8,7 +8,7 @@ from supabase import Client
 
 from ..core.db_columns import SHOPPING_ITEM_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.security import get_device_id, require_app_token
+from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     AddShoppingFromRecipeRequest,
     AddShoppingItemsRequest,
@@ -111,6 +111,9 @@ def _upsert_pending_shopping_items(
     recipe_id: str | None,
     recipe_title: str | None,
 ) -> tuple[int, int, list[dict]]:
+    if not aggregated:
+        return 0, 0, []
+
     existing_rows = (
         db.table("shopping_items")
         .select("id,name,quantity,unit")
@@ -124,56 +127,53 @@ def _upsert_pending_shopping_items(
 
     added_count = 0
     updated_count = 0
-    touched_rows: list[dict] = []
+    update_rows: list[dict] = []
+    insert_rows: list[dict] = []
 
     for key, payload in aggregated.items():
         existing = existing_by_name.get(key)
         if existing:
             current_qty = _parse_quantity(existing.get("quantity"))
             new_quantity = round(current_qty + payload["quantity"], 2)
-            updates: dict[str, object] = {
+            update_row: dict[str, object] = {
+                "id": existing["id"],
+                "device_id": device_id,
                 "quantity": new_quantity,
                 "unit": payload["unit"] or _normalize_unit(str(existing.get("unit") or "")),
             }
             if source != ShoppingItemSource.MANUAL:
-                updates["source"] = source.value
+                update_row["source"] = source.value
             if recipe_id:
-                updates["recipe_id"] = recipe_id
+                update_row["recipe_id"] = recipe_id
             if recipe_title:
-                updates["recipe_title"] = recipe_title
+                update_row["recipe_title"] = recipe_title
 
-            updated = (
-                db.table("shopping_items")
-                .update(updates)
-                .eq("id", existing["id"])
-                .eq("device_id", device_id)
-                .execute()
-            )
-            if updated.data:
-                touched_rows.append(updated.data[0])
-                updated_count += 1
+            update_rows.append(update_row)
+            updated_count += 1
             continue
 
-        inserted = (
-            db.table("shopping_items")
-            .insert(
-                {
-                    "device_id": device_id,
-                    "name": payload["name"],
-                    "quantity": payload["quantity"],
-                    "unit": payload["unit"],
-                    "status": ShoppingItemStatus.PENDING.value,
-                    "source": source.value,
-                    "recipe_id": recipe_id,
-                    "recipe_title": recipe_title,
-                    "added_to_inventory": False,
-                }
-            )
-            .execute()
+        insert_rows.append(
+            {
+                "device_id": device_id,
+                "name": payload["name"],
+                "quantity": payload["quantity"],
+                "unit": payload["unit"],
+                "status": ShoppingItemStatus.PENDING.value,
+                "source": source.value,
+                "recipe_id": recipe_id,
+                "recipe_title": recipe_title,
+                "added_to_inventory": False,
+            }
         )
-        if inserted.data:
-            touched_rows.append(inserted.data[0])
-            added_count += 1
+        added_count += 1
+
+    touched_rows: list[dict] = []
+    if update_rows:
+        updated = db.table("shopping_items").upsert(update_rows, on_conflict="id").execute()
+        touched_rows.extend(updated.data or [])
+    if insert_rows:
+        inserted = db.table("shopping_items").insert(insert_rows).execute()
+        touched_rows.extend(inserted.data or [])
 
     return added_count, updated_count, touched_rows
 
@@ -273,7 +273,7 @@ async def get_shopping_items(
     limit: int = Query(30, ge=1, le=200),
     offset: int = Query(0, ge=0),
     updated_since: Optional[datetime] = Query(None, description="Return rows updated since this timestamp"),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -333,7 +333,7 @@ async def get_shopping_items(
 async def get_low_stock_suggestions(
     lookback_days: int = Query(14, ge=3, le=60),
     threshold_days: int = Query(7, ge=1, le=30),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -386,7 +386,7 @@ async def get_low_stock_suggestions(
 async def add_low_stock_suggestions(
     lookback_days: int = Query(14, ge=3, le=60),
     threshold_days: int = Query(7, ge=1, le=30),
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -447,7 +447,7 @@ async def add_low_stock_suggestions(
 @router.post("/items", response_model=AddShoppingItemsResponse)
 async def add_shopping_items(
     request: AddShoppingItemsRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -502,7 +502,7 @@ async def add_shopping_items(
 @router.post("/from-recipe", response_model=AddShoppingItemsResponse)
 async def add_shopping_from_recipe(
     request: AddShoppingFromRecipeRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -557,7 +557,7 @@ async def add_shopping_from_recipe(
 @router.post("/checkout", response_model=ShoppingCheckoutResponse)
 async def checkout_shopping_items(
     request: ShoppingCheckoutRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -651,7 +651,7 @@ async def checkout_shopping_items(
 async def update_shopping_item(
     item_id: str,
     request: ShoppingItemUpdateRequest,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -715,7 +715,7 @@ async def update_shopping_item(
 @router.delete("/{item_id}", response_model=ShoppingDeleteResponse)
 async def delete_shopping_item(
     item_id: str,
-    device_id: str = Depends(get_device_id),
+    device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
     try:
@@ -744,6 +744,7 @@ async def delete_shopping_item(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete shopping item.",
         ) from exc
+
 
 
 

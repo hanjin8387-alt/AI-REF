@@ -5,6 +5,7 @@ def _auth_headers() -> dict[str, str]:
     return {
         "X-App-Token": "test-app-token",
         "X-Device-ID": "device-1234",
+        "X-Device-Token": "test-device-token",
     }
 
 
@@ -30,7 +31,8 @@ def test_bootstrap_returns_device_registration_status(client, seed_supabase) -> 
 
 
 def test_bootstrap_returns_unregistered_when_missing(client) -> None:
-    response = client.get("/auth/bootstrap", headers=_auth_headers())
+    headers = {**_auth_headers(), "X-Device-ID": "device-missing"}
+    response = client.get("/auth/bootstrap", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()

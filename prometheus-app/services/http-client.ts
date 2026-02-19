@@ -4,6 +4,7 @@ import { offlineCache } from './offline-cache';
 import { logHttpPerf } from './perf-logger';
 import { parseJsonWithWorker } from '../utils/json-worker';
 import { loadOrCreateDeviceId } from './device-id-storage';
+import { loadDeviceToken, saveDeviceToken } from './device-token-storage';
 
 const APP_TOKEN =
   process.env.EXPO_PUBLIC_APP_TOKEN ||
@@ -49,6 +50,7 @@ export type PendingSyncAction = {
 export class HttpClient {
   private readonly baseUrl: string;
   private deviceId: string | null = null;
+  private deviceToken: string | null = null;
   private initialized = false;
   private initializingPromise: Promise<void> | null = null;
   private readonly cache = new Map<string, CacheEntry>();
@@ -66,11 +68,21 @@ export class HttpClient {
     }
 
     this.initializingPromise = (async () => {
-      const deviceId = await loadOrCreateDeviceId();
+      const [deviceId, existingDeviceToken] = await Promise.all([
+        loadOrCreateDeviceId(),
+        loadDeviceToken(),
+      ]);
       this.deviceId = deviceId;
+      this.deviceToken = existingDeviceToken;
+
+      if (!this.deviceToken) {
+        const registerResult = await this.registerDevice(deviceId, undefined, Platform.OS);
+        if (!registerResult.data?.device_token) {
+          throw new Error(registerResult.error || 'Device token registration failed');
+        }
+      }
+
       this.initialized = true;
-      // Fire-and-forget: do not block startup on network registration.
-      void this.registerDevice(deviceId, undefined, Platform.OS).catch(() => undefined);
     })();
 
     try {
@@ -89,7 +101,7 @@ export class HttpClient {
   }
 
   async registerDevice(deviceId: string, pushToken?: string, platform?: string) {
-    return this.request<{ success: boolean; device_id: string; message: string }>('/auth/device-register', {
+    const result = await this.request<{ success: boolean; device_id: string; message: string; device_token: string }>('/auth/device-register', {
       skipInit: true,
       method: 'POST',
       timeoutMs: 5000,
@@ -100,6 +112,11 @@ export class HttpClient {
       }),
       skipOfflineQueue: true,
     });
+    if (result.data?.device_token) {
+      this.deviceToken = result.data.device_token;
+      await saveDeviceToken(result.data.device_token);
+    }
+    return result;
   }
 
   protected invalidateCache(prefixes: string[] = []) {
@@ -440,6 +457,7 @@ export class HttpClient {
     const headers: Record<string, string> = {
       ...(APP_TOKEN && { 'X-App-Token': APP_TOKEN }),
       ...(this.deviceId && { 'X-Device-ID': this.deviceId }),
+      ...(this.deviceToken && { 'X-Device-Token': this.deviceToken }),
       ...(idempotencyKey && { 'X-Idempotency-Key': idempotencyKey }),
     };
 

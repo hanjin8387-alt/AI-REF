@@ -36,6 +36,7 @@ class DeviceRegisterResponse(BaseModel):
     success: bool
     device_id: str
     message: str
+    device_token: str
 
 
 class BootstrapResponse(BaseModel):
@@ -81,6 +82,7 @@ class InventoryItem(BaseModel):
     unit: str
     expiry_date: Optional[datetime] = None
     category: Optional[str] = None
+    image_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
