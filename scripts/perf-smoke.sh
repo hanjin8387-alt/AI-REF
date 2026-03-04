@@ -4,12 +4,30 @@ set -euo pipefail
 API_URL="${API_URL:-http://localhost:8000}"
 REQUEST_COUNT="${REQUEST_COUNT:-20}"
 P95_BUDGET_MS="${P95_BUDGET_MS:-500}"
+APP_ID="${APP_ID:-prometheus-app}"
 APP_TOKEN="${APP_TOKEN:-}"
 DEVICE_ID="${DEVICE_ID:-perf-smoke-device}"
+DEVICE_TOKEN="${DEVICE_TOKEN:-}"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "[perf-smoke] curl is required" >&2
   exit 1
+fi
+
+if [[ -z "${DEVICE_TOKEN}" ]]; then
+  echo "[perf-smoke] DEVICE_TOKEN is required" >&2
+  echo "[perf-smoke] hint: call /auth/device-register first to obtain a device token" >&2
+  exit 1
+fi
+
+auth_headers=(
+  -H "X-App-ID: ${APP_ID}"
+  -H "X-Device-ID: ${DEVICE_ID}"
+  -H "X-Device-Token: ${DEVICE_TOKEN}"
+)
+
+if [[ -n "${APP_TOKEN}" ]]; then
+  auth_headers+=(-H "X-App-Token: ${APP_TOKEN}")
 fi
 
 measure_endpoint() {
@@ -24,15 +42,14 @@ measure_endpoint() {
     output="$(
       curl -sS -o /dev/null \
         -w "%{http_code} %{time_total}" \
-        -H "X-Device-ID: ${DEVICE_ID}" \
-        ${APP_TOKEN:+-H "X-App-Token: ${APP_TOKEN}"} \
+        "${auth_headers[@]}" \
         "${API_URL}${path}"
     )"
 
     local code="${output%% *}"
     local time_total="${output##* }"
 
-    if [[ "$code" == "000" ]] || [[ "$code" -ge 500 ]]; then
+    if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
       echo "[perf-smoke] request failed endpoint=${path} status=${code}" >&2
       rm -f "$tmp"
       exit 1
@@ -68,8 +85,7 @@ measure_endpoint() {
   rm -f "$tmp"
 }
 
-measure_endpoint "/health"
+measure_endpoint "/auth/bootstrap"
 measure_endpoint "/inventory"
 
 echo "[perf-smoke] completed"
-

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
-import Colors from '@/constants/Colors';
 import { GlassCard } from '@/components/GlassCard';
 
 type SkeletonCardProps = {

@@ -27,6 +27,7 @@ export type ScanResultPayload = {
 export type InventoryItem = {
   id: string;
   name: string;
+  name_normalized?: string;
   quantity: number;
   unit: string;
   expiry_date?: string;
@@ -221,12 +222,28 @@ export type BarcodeResponse = {
 export type BackupExportResponse = {
   success: boolean;
   exported_at: string;
+  status?: 'ok' | 'degraded' | 'failed';
+  warnings?: string[];
+  table_results?: Array<{
+    table: string;
+    status: 'ok' | 'degraded' | 'failed';
+    row_count: number;
+    error?: string | null;
+  }>;
   payload: Record<string, unknown>;
 };
 
 export type BackupRestoreResponse = {
   success: boolean;
   message: string;
+  status?: 'ok' | 'degraded' | 'failed';
+  warnings?: string[];
+  table_results?: Array<{
+    table: string;
+    status: 'ok' | 'degraded' | 'failed';
+    row_count: number;
+    error?: string | null;
+  }>;
   restored_counts: Record<string, number>;
 };
 
@@ -242,6 +259,7 @@ export type SyncStatusResponse = {
 export type BootstrapResponse = {
   api_ok: boolean;
   token_required: boolean;
+  app_id_required?: boolean;
   device_registered: boolean;
   sync_pending_count: number;
   last_sync_at?: string | null;

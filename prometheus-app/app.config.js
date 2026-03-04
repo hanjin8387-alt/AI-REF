@@ -10,7 +10,8 @@ module.exports = () => ({
     extra: {
       ...extra,
       apiUrl: process.env.EXPO_PUBLIC_API_URL || extra.apiUrl,
-      appToken: process.env.EXPO_PUBLIC_APP_TOKEN || extra.appToken || "",
+      appId: process.env.EXPO_PUBLIC_APP_ID || extra.appId || "prometheus-app",
+      legacyAppToken: process.env.EXPO_PUBLIC_APP_TOKEN || extra.legacyAppToken || "",
     },
   },
 });

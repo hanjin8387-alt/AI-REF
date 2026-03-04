@@ -1,36 +1,62 @@
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 import type {
   ApiRecipe,
-  BackupExportResponse,
-  BackupRestoreResponse,
   BarcodeResponse,
-  BootstrapResponse,
-  CookingHistoryItem,
-  CookingHistoryResponse,
   InventoryItem,
   InventoryListResponse,
-  LowStockSuggestionResponse,
   NotificationListResponse,
   PriceHistoryResponse,
-  ShoppingCheckoutResponse,
+  ScanResultPayload,
+  ScanSourceType,
   ShoppingItem,
   ShoppingItemSource,
   ShoppingItemStatus,
   ShoppingListResponse,
-  ScanResultPayload,
-  ScanSourceType,
   SortOption,
   StatsSummaryResponse,
   SyncStatusResponse,
 } from './api.types';
+import { getApiBaseUrl } from './config/runtime';
+import {
+  bootstrapDomain,
+  exportBackupDomain,
+  restoreBackupDomain,
+} from './domain/auth-api';
+import {
+  bulkAddInventoryDomain,
+  deleteInventoryItemDomain,
+  getInventoryDomain,
+  restoreInventoryItemDomain,
+  updateInventoryItemDomain,
+} from './domain/inventory-api';
+import {
+  addFavoriteRecipeDomain,
+  completeCookingDomain,
+  getCookingHistoryDetailDomain,
+  getCookingHistoryDomain,
+  getFavoriteRecipesDomain,
+  getRecipeDomain,
+  getRecommendationsDomain,
+  removeFavoriteRecipeDomain,
+} from './domain/recipes-api';
+import {
+  addLowStockSuggestionsDomain,
+  addShoppingFromRecipeDomain,
+  addShoppingItemsDomain,
+  checkoutShoppingItemsDomain,
+  deleteShoppingItemDomain,
+  getLowStockSuggestionsDomain,
+  getShoppingItemsDomain,
+  updateShoppingItemDomain,
+} from './domain/shopping-api';
 import { HttpClient } from './http-client';
 import { offlineCache } from './offline-cache';
 
 export type {
   ApiRecipe,
   BackupExportResponse,
+  BackupRestoreResponse,
   BarcodeResponse,
   BootstrapResponse,
   CookingHistoryItem,
@@ -43,7 +69,6 @@ export type {
   NotificationListResponse,
   PriceHistoryItem,
   PriceHistoryResponse,
-  BackupRestoreResponse,
   ShoppingCheckoutResponse,
   ShoppingItem,
   ShoppingItemSource,
@@ -57,11 +82,10 @@ export type {
   SyncStatusResponse,
 } from './api.types';
 
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 'https://ai-ref-api-274026276907.asia-northeast3.run.app';
+const API_URL = getApiBaseUrl();
 const DEFAULT_SCAN_EXTENSION = 'jpg';
 const SCAN_UPLOAD_TIMEOUT_MS = 120000;
 const SCAN_RESULT_TIMEOUT_MS = 30000;
-const RECOMMENDATIONS_TIMEOUT_MS = 45000;
 
 function normalizeImageExtension(raw?: string): string {
   const normalized = (raw || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -133,72 +157,22 @@ class ApiClient extends HttpClient {
   }
 
   async getInventory(category?: string, sortBy: SortOption = 'expiry_date', limit = 30, offset = 0) {
-    const params = new URLSearchParams({
-      sort_by: sortBy,
-      limit: String(limit),
-      offset: String(offset),
-    });
-    if (category) params.append('category', category);
-
-    const result = await this.request<InventoryListResponse>(`/inventory?${params.toString()}`, {
-      cacheTtlMs: 3000,
-    });
-
-    // Auto-save to offline cache
-    if (result.data?.items) {
-      import('./offline-cache').then(m => m.offlineCache.saveInventory(result.data!.items)).catch(() => { });
-    }
-
-    if (result.data) {
-      result.data.offline = Boolean(result.offline || result.data.offline);
-      result.data.cache_timestamp = result.data.cache_timestamp ?? result.cache_timestamp ?? null;
-    }
-    return result;
+    return getInventoryDomain(this, category, sortBy, limit, offset);
   }
 
   async bulkAddInventory(items: Array<{ name: string; quantity: number; unit: string; expiry_date?: string; category?: string }>) {
-    const result = await this.request<{
-      success: boolean;
-      added_count: number;
-      updated_count: number;
-      items: InventoryItem[];
-    }>('/inventory/bulk', {
-      method: 'POST',
-      body: JSON.stringify({ items }),
-    });
-
-    if (result.data) {
-      this.invalidateCache(['/inventory', '/recipes/recommendations', '/notifications']);
-    }
-    return result;
+    return bulkAddInventoryDomain(this, items);
   }
 
   async updateInventoryItem(
     itemId: string,
     payload: Partial<Pick<InventoryItem, 'name' | 'quantity' | 'unit' | 'expiry_date' | 'category'>>
   ) {
-    const result = await this.request<InventoryItem>(`/inventory/${itemId}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    if (result.data) {
-      this.invalidateCache(['/inventory']);
-    }
-    return result;
+    return updateInventoryItemDomain(this, itemId, payload);
   }
 
   async deleteInventoryItem(itemId: string) {
-    const result = await this.request<{
-      success: boolean;
-      message: string;
-      deleted_item?: InventoryItem;
-    }>(`/inventory/${itemId}`, {
-      method: 'DELETE',
-    });
-    if (result.data?.success) {
-      this.invalidateCache(['/inventory', '/recipes/recommendations', '/notifications']);
-    }
-    return result;
+    return deleteInventoryItemDomain(this, itemId);
   }
 
   async restoreInventoryItem(payload: {
@@ -208,155 +182,39 @@ class ApiClient extends HttpClient {
     expiry_date?: string;
     category?: string;
   }) {
-    const result = await this.request<InventoryItem>('/inventory/restore', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    if (result.data) {
-      this.invalidateCache(['/inventory', '/recipes/recommendations', '/notifications']);
-    }
-    return result;
+    return restoreInventoryItemDomain(this, payload);
   }
 
   async getRecommendations(limit = 5, forceRefresh = false) {
-    const fallback = () =>
-      this.request<{ recipes: ApiRecipe[]; total_count: number }>(
-        `/recipes/recommendations?limit=${limit}&force_refresh=${forceRefresh ? 'true' : 'false'}`,
-        {
-          cacheTtlMs: forceRefresh ? 0 : 10000,
-          timeoutMs: RECOMMENDATIONS_TIMEOUT_MS,
-        }
-      );
-
-    const createJob = await this.request<{ job_id: string; status: string }>(
-      `/recipes/recommendations/jobs?limit=${limit}&force_refresh=${forceRefresh ? 'true' : 'false'}`,
-      {
-        method: 'POST',
-        timeoutMs: 10000,
-        skipOfflineQueue: true,
-      }
-    );
-
-    if (!createJob.data?.job_id) {
-      return fallback();
-    }
-
-    const jobId = createJob.data.job_id;
-    const maxPolls = 20;
-    for (let attempt = 0; attempt < maxPolls; attempt += 1) {
-      const statusResult = await this.request<{
-        job_id: string;
-        status: 'pending' | 'processing' | 'completed' | 'failed';
-        recipes?: ApiRecipe[];
-        total_count?: number;
-        error?: string;
-      }>(`/recipes/recommendations/jobs/${jobId}`, {
-        cacheTtlMs: 0,
-        timeoutMs: 10000,
-        skipOfflineQueue: true,
-      });
-
-      if (!statusResult.data) {
-        return { error: statusResult.error || '레시피 추천 상태를 확인하지 못했어요.' };
-      }
-
-      if (statusResult.data.status === 'completed') {
-        const recipes = statusResult.data.recipes || [];
-        return {
-          data: {
-            recipes,
-            total_count: statusResult.data.total_count ?? recipes.length,
-          },
-        };
-      }
-
-      if (statusResult.data.status === 'failed') {
-        return { error: statusResult.data.error || '레시피 추천 생성에 실패했어요.' };
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    return { error: '레시피 추천 생성이 지연되고 있어요. 잠시 후 다시 시도해 주세요.' };
+    return getRecommendationsDomain(this, limit, forceRefresh);
   }
 
   async getRecipe(recipeId: string) {
-    return this.request<ApiRecipe>(`/recipes/${recipeId}`, { cacheTtlMs: 15000 });
+    return getRecipeDomain(this, recipeId);
   }
 
   async getFavoriteRecipes(limit = 30, offset = 0) {
-    const result = await this.request<{ recipes: ApiRecipe[]; total_count: number }>(
-      `/recipes/favorites?limit=${limit}&offset=${offset}`,
-      { cacheTtlMs: 6000 }
-    );
-
-    // Auto-save to offline cache
-    if (result.data?.recipes) {
-      import('./offline-cache').then(m => m.offlineCache.saveFavorites(result.data!.recipes)).catch(() => { });
-    }
-    return result;
+    return getFavoriteRecipesDomain(this, limit, offset);
   }
 
   async addFavoriteRecipe(recipe: ApiRecipe) {
-    const result = await this.request<{ success: boolean; is_favorite: boolean; message: string }>(
-      `/recipes/${recipe.id}/favorite`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ recipe }),
-      }
-    );
-    if (result.data?.success) {
-      this.invalidateCache(['/recipes/recommendations', '/recipes/favorites', `/recipes/${recipe.id}`]);
-    }
-    return result;
+    return addFavoriteRecipeDomain(this, recipe);
   }
 
   async removeFavoriteRecipe(recipeId: string) {
-    const result = await this.request<{ success: boolean; is_favorite: boolean; message: string }>(
-      `/recipes/${recipeId}/favorite`,
-      {
-        method: 'DELETE',
-      }
-    );
-    if (result.data?.success) {
-      this.invalidateCache(['/recipes/recommendations', '/recipes/favorites', `/recipes/${recipeId}`]);
-    }
-    return result;
+    return removeFavoriteRecipeDomain(this, recipeId);
   }
 
   async completeCooking(recipeId: string, servings = 1) {
-    const result = await this.request<{
-      success: boolean;
-      message: string;
-      deducted_items: Array<{
-        name: string;
-        deducted: number;
-        remaining: number;
-        deleted: boolean;
-      }>;
-    }>(`/recipes/${recipeId}/cook`, {
-      method: 'POST',
-      body: JSON.stringify({ servings }),
-    });
-
-    if (result.data?.success) {
-      this.invalidateCache([
-        '/inventory',
-        '/recipes/recommendations',
-        `/recipes/${recipeId}`,
-        '/recipes/history',
-        '/notifications',
-      ]);
-    }
-    return result;
+    return completeCookingDomain(this, recipeId, servings);
   }
 
   async getCookingHistory(limit = 20, offset = 0) {
-    return this.request<CookingHistoryResponse>(`/recipes/history?limit=${limit}&offset=${offset}`, { cacheTtlMs: 5000 });
+    return getCookingHistoryDomain(this, limit, offset);
   }
 
   async getCookingHistoryDetail(historyId: string) {
-    return this.request<CookingHistoryItem>(`/recipes/history/${historyId}`, { cacheTtlMs: 5000 });
+    return getCookingHistoryDetailDomain(this, historyId);
   }
 
   async getNotifications(limit = 30, offset = 0, onlyUnread = false) {
@@ -378,16 +236,7 @@ class ApiClient extends HttpClient {
   }
 
   async getShoppingItems(status?: ShoppingItemStatus, limit = 30, offset = 0) {
-    const params = new URLSearchParams({
-      limit: String(limit),
-      offset: String(offset),
-    });
-    if (status) params.append('status', status);
-    const result = await this.request<ShoppingListResponse>(`/shopping?${params.toString()}`, { cacheTtlMs: 3000 });
-    if (result.data) {
-      import('./offline-cache').then(m => m.offlineCache.saveShopping(result.data!)).catch(() => { });
-    }
-    return result;
+    return getShoppingItemsDomain(this, status, limit, offset);
   }
 
   async addShoppingItems(
@@ -398,25 +247,7 @@ class ApiClient extends HttpClient {
       recipe_title?: string;
     } = {}
   ) {
-    const result = await this.request<{
-      success: boolean;
-      added_count: number;
-      updated_count: number;
-      items: ShoppingItem[];
-    }>('/shopping/items', {
-      method: 'POST',
-      body: JSON.stringify({
-        items,
-        source: options.source || 'manual',
-        recipe_id: options.recipe_id,
-        recipe_title: options.recipe_title,
-      }),
-    });
-
-    if (result.data?.success) {
-      this.invalidateCache(['/shopping', '/notifications']);
-    }
-    return result;
+    return addShoppingItemsDomain(this, items, options);
   }
 
   async addShoppingFromRecipe(
@@ -425,96 +256,31 @@ class ApiClient extends HttpClient {
     servings: number,
     ingredients: Array<{ name: string; quantity: number; unit: string }>
   ) {
-    const result = await this.request<{
-      success: boolean;
-      added_count: number;
-      updated_count: number;
-      items: ShoppingItem[];
-    }>('/shopping/from-recipe', {
-      method: 'POST',
-      body: JSON.stringify({
-        recipe_id: recipeId,
-        recipe_title: recipeTitle,
-        servings,
-        ingredients,
-      }),
-    });
-
-    if (result.data?.success) {
-      this.invalidateCache(['/shopping', '/notifications']);
-    }
-    return result;
+    return addShoppingFromRecipeDomain(this, recipeId, recipeTitle, servings, ingredients);
   }
 
   async checkoutShoppingItems(ids: string[] = [], addToInventory = true) {
-    const result = await this.request<ShoppingCheckoutResponse>('/shopping/checkout', {
-      method: 'POST',
-      body: JSON.stringify({
-        ids,
-        add_to_inventory: addToInventory,
-      }),
-    });
-
-    if (result.data?.success) {
-      this.invalidateCache(['/shopping', '/notifications']);
-      if (addToInventory) {
-        this.invalidateCache(['/inventory', '/recipes/recommendations']);
-      }
-    }
-    return result;
+    return checkoutShoppingItemsDomain(this, ids, addToInventory);
   }
 
   async updateShoppingItem(
     itemId: string,
     payload: Partial<Pick<ShoppingItem, 'name' | 'quantity' | 'unit' | 'status'>>
   ) {
-    const result = await this.request<ShoppingItem>(`/shopping/${itemId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    if (result.data) {
-      this.invalidateCache(['/shopping']);
-    }
-    return result;
+    return updateShoppingItemDomain(this, itemId, payload);
   }
 
   async deleteShoppingItem(itemId: string) {
-    const result = await this.request<{
-      success: boolean;
-      message: string;
-      deleted_item?: ShoppingItem;
-    }>(`/shopping/${itemId}`, {
-      method: 'DELETE',
-    });
-    if (result.data?.success) {
-      this.invalidateCache(['/shopping']);
-    }
-    return result;
+    return deleteShoppingItemDomain(this, itemId);
   }
 
   async getLowStockSuggestions(lookbackDays = 14, thresholdDays = 7) {
-    return this.request<LowStockSuggestionResponse>(
-      `/shopping/suggestions/low-stock?lookback_days=${lookbackDays}&threshold_days=${thresholdDays}`,
-      { cacheTtlMs: 3000 }
-    );
+    return getLowStockSuggestionsDomain(this, lookbackDays, thresholdDays);
   }
 
   async addLowStockSuggestions(lookbackDays = 14, thresholdDays = 7) {
-    const result = await this.request<{
-      success: boolean;
-      added_count: number;
-      updated_count: number;
-      items: ShoppingItem[];
-    }>(`/shopping/suggestions/low-stock/add?lookback_days=${lookbackDays}&threshold_days=${thresholdDays}`, {
-      method: 'POST',
-    });
-    if (result.data?.success) {
-      this.invalidateCache(['/shopping', '/notifications']);
-    }
-    return result;
+    return addLowStockSuggestionsDomain(this, lookbackDays, thresholdDays);
   }
-
-  // --- Statistics ---
 
   async getStatsSummary(period: 'week' | 'month' | 'all' = 'month') {
     return this.request<StatsSummaryResponse>(`/stats/summary?period=${period}`, { cacheTtlMs: 10000 });
@@ -531,22 +297,15 @@ class ApiClient extends HttpClient {
   }
 
   async exportBackup() {
-    return this.request<BackupExportResponse>('/auth/backup/export', { cacheTtlMs: 0 });
+    return exportBackupDomain(this);
   }
 
   async restoreBackup(payload: Record<string, unknown>, mode: 'merge' | 'replace' = 'merge') {
-    return this.request<BackupRestoreResponse>('/auth/backup/restore', {
-      method: 'POST',
-      body: JSON.stringify({ payload, mode }),
-    });
+    return restoreBackupDomain(this, payload, mode);
   }
 
   async bootstrap(options: { timeoutMs?: number } = {}) {
-    return this.request<BootstrapResponse>('/auth/bootstrap', {
-      cacheTtlMs: 0,
-      skipOfflineQueue: true,
-      timeoutMs: options.timeoutMs,
-    });
+    return bootstrapDomain(this, options);
   }
 
   private mergeById<T extends { id: string }>(base: T[], delta: T[]): T[] {
@@ -684,8 +443,6 @@ class ApiClient extends HttpClient {
     }
     return retryResult;
   }
-
-  // --- Barcode ---
 
   async lookupBarcode(code: string) {
     return this.request<BarcodeResponse>(`/scans/barcode?code=${encodeURIComponent(code)}`, { cacheTtlMs: 30000 });

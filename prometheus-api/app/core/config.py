@@ -1,5 +1,5 @@
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
@@ -10,11 +10,14 @@ class Settings(BaseSettings):
     app_name: str = "PROMETHEUS API"
     debug: bool = False
     environment: str = "development"
-    require_app_token: bool = True
+    app_ids: str = "prometheus-app,prometheus-web"
+    allow_legacy_app_token: bool = True
+    require_app_token: bool = False
     app_token: str = ""
     admin_token: str = ""
     cors_origins: str = "http://localhost:8081,http://localhost:19006,http://localhost:3000"
     allowed_device_ids: str = ""
+    device_token_ttl_hours: int = 720
 
     # Gemini API
     gemini_api_key: str = ""
@@ -61,9 +64,17 @@ class Settings(BaseSettings):
             return set()
         return {item.strip() for item in raw.split(",") if item.strip()}
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    @property
+    def parsed_app_ids(self) -> set[str]:
+        raw = self.app_ids.strip()
+        if not raw:
+            return set()
+        return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+    )
 
 
 @lru_cache()

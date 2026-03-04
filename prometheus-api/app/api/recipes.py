@@ -30,7 +30,7 @@ from ..schemas.schemas import (
     Recipe,
     RecipeListResponse,
 )
-from ..services.gemini_service import GeminiService, get_gemini_service
+from ..services.gemini_service import GeminiContractError, GeminiService, get_gemini_service
 from ..services.notifications import create_notification
 from ..services.recipe_cache import RecipeCacheProtocol, get_recipe_cache
 from ..services.inventory_service import log_inventory_change
@@ -210,9 +210,28 @@ async def _build_recommendation_response(
 
     try:
         recipes_data = await gemini.generate_recipe_recommendations(inventory_items, max_recipes=limit)
-    except Exception:
+    except GeminiContractError as exc:
+        logger.exception("recipe recommendation contract failed device_id=%s", device_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "status": "failed",
+                "error_code": exc.code,
+                "message": str(exc),
+                "warnings": ["No recommendation fallback response was generated."],
+            },
+        ) from exc
+    except Exception as exc:
         logger.exception("recipe recommendation generation failed device_id=%s", device_id)
-        recipes_data = []
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "status": "failed",
+                "error_code": "recommendation_generation_failed",
+                "message": "Failed to generate recommendations.",
+                "warnings": ["No recommendation fallback response was generated."],
+            },
+        ) from exc
     recipes = [map_generated_recipe(recipe_data, inventory_items) for recipe_data in recipes_data]
     recipes.sort(key=lambda recipe: recipe.priority_score, reverse=True)
     recipes = recipes[:limit]

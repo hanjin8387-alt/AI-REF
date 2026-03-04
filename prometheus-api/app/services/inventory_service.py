@@ -5,7 +5,9 @@ from typing import Any
 
 from supabase import Client
 
+from ..core.normalization import normalize_item_name
 from ..schemas.schemas import InventoryItem
+from .storage_utils import normalize_storage_category
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +35,25 @@ def bulk_upsert_inventory(
     if not items:
         return 0, 0, []
 
-    # Aggregate by lowercase name
+    # Aggregate by normalized name
     aggregated: dict[str, dict] = {}
     for raw_item in items:
         name = str(raw_item.get("name", "")).strip()
         if not name:
             continue
 
-        key = name.lower()
+        key = normalize_item_name(name)
+        if not key:
+            continue
         payload = aggregated.setdefault(
             key,
             {
                 "name": name,
+                "name_normalized": key,
                 "quantity": 0.0,
                 "unit": (str(raw_item.get("unit") or "unit")).strip() or "unit",
                 "expiry_date": None,
-                "category": raw_item.get("category"),
+                "category": normalize_storage_category(raw_item.get("category")),
             },
         )
         payload["quantity"] += max(float(raw_item.get("quantity", 0)), 0.0)
@@ -60,27 +65,40 @@ def bulk_upsert_inventory(
             current = payload["expiry_date"]
             if current is None or expiry < current:
                 payload["expiry_date"] = expiry
+        category = normalize_storage_category(raw_item.get("category"))
+        if category:
+            payload["category"] = category
 
     if not aggregated:
         return 0, 0, []
 
-    input_names = [str(payload["name"]).strip() for payload in aggregated.values() if str(payload["name"]).strip()]
+    input_name_keys = [
+        str(payload.get("name_normalized") or "").strip()
+        for payload in aggregated.values()
+        if str(payload.get("name_normalized") or "").strip()
+    ]
 
     # Fetch existing inventory
     existing_query = (
         db.table("inventory")
-        .select("id,name,quantity,unit,expiry_date,category")
+        .select("id,name,name_normalized,quantity,unit,expiry_date,category")
         .eq("device_id", device_id)
     )
-    if input_names:
-        existing_query = existing_query.in_("name", input_names)
+    if input_name_keys:
+        existing_query = existing_query.in_("name_normalized", input_name_keys)
     existing_rows = existing_query.execute().data or []
-    existing_by_name = {str(row["name"]).strip().lower(): row for row in existing_rows}
+    existing_by_name = {}
+    for row in existing_rows:
+        row_key = str(row.get("name_normalized") or "").strip()
+        if not row_key:
+            row_key = normalize_item_name(str(row.get("name") or ""))
+        if row_key:
+            existing_by_name[row_key] = row
 
     upsert_rows: list[dict] = []
     added_count = 0
     updated_count = 0
-    touched_names: list[str] = []
+    touched_name_keys: list[str] = []
     log_entries: list[dict] = []
 
     for key, payload in aggregated.items():
@@ -91,19 +109,23 @@ def bulk_upsert_inventory(
             continue
 
         row_name = str(existing["name"]).strip() if existing else payload["name"]
-        touched_names.append(row_name)
+        row_name_key = str(existing.get("name_normalized") or "").strip() if existing else key
+        if not row_name_key:
+            row_name_key = normalize_item_name(row_name)
+        touched_name_keys.append(row_name_key)
         upsert_rows.append(
             {
                 "device_id": device_id,
                 "name": row_name,
+                "name_normalized": row_name_key,
                 "quantity": new_quantity,
                 "unit": payload["unit"]
                 or (existing.get("unit") if existing else "unit")
                 or "unit",
                 "expiry_date": _to_iso_date(payload["expiry_date"])
                 or (existing.get("expiry_date") if existing else None),
-                "category": payload.get("category")
-                or (existing.get("category") if existing else None),
+                "category": normalize_storage_category(payload.get("category"))
+                or normalize_storage_category(existing.get("category") if existing else None),
             }
         )
 
@@ -126,16 +148,16 @@ def bulk_upsert_inventory(
     if not upsert_rows:
         return 0, 0, []
 
-    db.table("inventory").upsert(upsert_rows, on_conflict="device_id,name").execute()
+    db.table("inventory").upsert(upsert_rows, on_conflict="device_id,name_normalized").execute()
 
     # Log inventory changes (best-effort)
     _write_inventory_logs(db, log_entries)
 
     refreshed_rows = (
         db.table("inventory")
-        .select("id,name,quantity,unit,expiry_date,category")
+        .select("id,name,name_normalized,quantity,unit,expiry_date,category")
         .eq("device_id", device_id)
-        .in_("name", touched_names)
+        .in_("name_normalized", touched_name_keys)
         .execute()
         .data
         or []

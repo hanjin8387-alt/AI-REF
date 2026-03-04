@@ -56,10 +56,10 @@ function removeWebShellLoader() {
 function classifyBootstrapIssue(error: string): BootstrapIssue {
   const normalized = (error || '').toLowerCase();
 
-  if (normalized.includes('app token')) {
+  if (normalized.includes('app token') || normalized.includes('app-id') || normalized.includes('x-app-id')) {
     return {
       title: '앱 인증 토큰 설정 필요',
-      detail: '서버 또는 앱의 토큰 설정이 맞지 않습니다. EXPO_PUBLIC_APP_TOKEN과 서버 APP_TOKEN을 확인해 주세요.',
+      detail: '앱 식별자 설정이 맞지 않습니다. EXPO_PUBLIC_APP_ID와 서버 APP_IDS 설정을 확인해 주세요.',
     };
   }
 

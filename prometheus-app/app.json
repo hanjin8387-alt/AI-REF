@@ -62,7 +62,9 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://ai-ref-api-274026276907.asia-northeast3.run.app"
+      "apiUrl": "http://localhost:8000",
+      "appId": "prometheus-app",
+      "legacyAppToken": ""
     }
   }
 }

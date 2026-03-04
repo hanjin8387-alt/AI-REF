@@ -3,32 +3,38 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from supabase import Client
 
 from ..core.db_columns import SHOPPING_ITEM_SELECT_COLUMNS
 from ..core.database import get_db
+from ..core.idempotency import load_idempotent_response, save_idempotent_response
 from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     AddShoppingFromRecipeRequest,
     AddShoppingItemsRequest,
     AddShoppingItemsResponse,
     InventoryItem,
-    LowStockSuggestionItem,
     LowStockSuggestionResponse,
     NotificationType,
     ShoppingCheckoutRequest,
     ShoppingCheckoutResponse,
     ShoppingDeleteResponse,
     ShoppingItem,
-    ShoppingItemInput,
     ShoppingItemSource,
     ShoppingItemStatus,
     ShoppingItemUpdateRequest,
     ShoppingListResponse,
 )
-from ..services.inventory_service import bulk_upsert_inventory
 from ..services.notifications import create_notification
+from ..use_cases.shopping_use_cases import (
+    aggregate_shopping_items,
+    apply_inventory_from_shopping,
+    build_low_stock_suggestions,
+    normalize_name,
+    normalize_unit,
+    upsert_pending_shopping_items,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,208 +59,6 @@ def _handle_shopping_table_error(exc: Exception) -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=SHOPPING_TABLE_MISSING_DETAIL,
         ) from exc
-
-
-def _normalize_name(value: str) -> str:
-    return value.strip().lower()
-
-
-def _normalize_unit(value: str | None) -> str:
-    unit = (value or "").strip()
-    if not unit:
-        return "\uAC1C"
-    if unit.lower() == "unit":
-        return "\uAC1C"
-    return unit
-
-
-def _parse_quantity(value: object) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _aggregate_items(items: list[ShoppingItemInput]) -> dict[str, dict]:
-    aggregated: dict[str, dict] = {}
-    for item in items:
-        name = item.name.strip()
-        if not name:
-            continue
-        quantity = max(float(item.quantity), 0.0)
-        if quantity <= 0:
-            continue
-
-        key = _normalize_name(name)
-        payload = aggregated.setdefault(
-            key,
-            {
-                "name": name,
-                "quantity": 0.0,
-                "unit": _normalize_unit(item.unit),
-            },
-        )
-        payload["quantity"] += quantity
-        if item.unit and item.unit.strip():
-            payload["unit"] = _normalize_unit(item.unit)
-
-    for payload in aggregated.values():
-        payload["quantity"] = round(payload["quantity"], 2)
-    return aggregated
-
-
-def _upsert_pending_shopping_items(
-    db: Client,
-    device_id: str,
-    aggregated: dict[str, dict],
-    source: ShoppingItemSource,
-    recipe_id: str | None,
-    recipe_title: str | None,
-) -> tuple[int, int, list[dict]]:
-    if not aggregated:
-        return 0, 0, []
-
-    existing_rows = (
-        db.table("shopping_items")
-        .select("id,name,quantity,unit")
-        .eq("device_id", device_id)
-        .eq("status", ShoppingItemStatus.PENDING.value)
-        .execute()
-        .data
-        or []
-    )
-    existing_by_name = {str(row.get("name", "")).strip().lower(): row for row in existing_rows}
-
-    added_count = 0
-    updated_count = 0
-    update_rows: list[dict] = []
-    insert_rows: list[dict] = []
-
-    for key, payload in aggregated.items():
-        existing = existing_by_name.get(key)
-        if existing:
-            current_qty = _parse_quantity(existing.get("quantity"))
-            new_quantity = round(current_qty + payload["quantity"], 2)
-            update_row: dict[str, object] = {
-                "id": existing["id"],
-                "device_id": device_id,
-                "quantity": new_quantity,
-                "unit": payload["unit"] or _normalize_unit(str(existing.get("unit") or "")),
-            }
-            if source != ShoppingItemSource.MANUAL:
-                update_row["source"] = source.value
-            if recipe_id:
-                update_row["recipe_id"] = recipe_id
-            if recipe_title:
-                update_row["recipe_title"] = recipe_title
-
-            update_rows.append(update_row)
-            updated_count += 1
-            continue
-
-        insert_rows.append(
-            {
-                "device_id": device_id,
-                "name": payload["name"],
-                "quantity": payload["quantity"],
-                "unit": payload["unit"],
-                "status": ShoppingItemStatus.PENDING.value,
-                "source": source.value,
-                "recipe_id": recipe_id,
-                "recipe_title": recipe_title,
-                "added_to_inventory": False,
-            }
-        )
-        added_count += 1
-
-    touched_rows: list[dict] = []
-    if update_rows:
-        updated = db.table("shopping_items").upsert(update_rows, on_conflict="id").execute()
-        touched_rows.extend(updated.data or [])
-    if insert_rows:
-        inserted = db.table("shopping_items").insert(insert_rows).execute()
-        touched_rows.extend(inserted.data or [])
-
-    return added_count, updated_count, touched_rows
-
-
-def _apply_inventory_from_shopping(
-    db: Client,
-    device_id: str,
-    shopping_rows: list[dict],
-) -> tuple[int, int, list[InventoryItem]]:
-    raw_items = []
-    for row in shopping_rows:
-        name = str(row.get("name", "")).strip()
-        if not name:
-            continue
-        quantity = max(_parse_quantity(row.get("quantity")), 0.0)
-        if quantity <= 0:
-            continue
-        raw_items.append(
-            {
-                "name": name,
-                "quantity": quantity,
-                "unit": _normalize_unit(str(row.get("unit") or "")),
-            }
-        )
-
-    return bulk_upsert_inventory(db, device_id, raw_items)
-
-
-def _build_low_stock_suggestions(
-    inventory_rows: list[dict],
-    consumption_rows: list[dict],
-    pending_shopping_rows: list[dict],
-    lookback_days: int,
-    threshold_days: int,
-) -> list[LowStockSuggestionItem]:
-    pending_names = {str(row.get("name", "")).strip().lower() for row in pending_shopping_rows}
-
-    daily_usage_by_name: dict[str, float] = {}
-    for row in consumption_rows:
-        if str(row.get("action", "")).lower() != "cook":
-            continue
-        item_name = str(row.get("item_name", "")).strip().lower()
-        if not item_name:
-            continue
-        qty = abs(_parse_quantity(row.get("quantity_change")))
-        if qty <= 0:
-            continue
-        daily_usage_by_name[item_name] = daily_usage_by_name.get(item_name, 0.0) + (qty / max(1, lookback_days))
-
-    suggestions: list[LowStockSuggestionItem] = []
-    for row in inventory_rows:
-        item_name_raw = str(row.get("name", "")).strip()
-        item_name = item_name_raw.lower()
-        if not item_name or item_name in pending_names:
-            continue
-
-        current_qty = max(_parse_quantity(row.get("quantity")), 0.0)
-        if current_qty <= 0:
-            continue
-
-        daily_usage = daily_usage_by_name.get(item_name, 0.0)
-        if daily_usage <= 0:
-            continue
-
-        predicted_days = round(current_qty / daily_usage, 1)
-        if predicted_days > threshold_days:
-            continue
-
-        recommended_qty = max(round((daily_usage * 7) - current_qty, 2), 1.0)
-        suggestions.append(
-            LowStockSuggestionItem(
-                name=item_name_raw,
-                current_quantity=round(current_qty, 2),
-                unit=_normalize_unit(str(row.get("unit") or "")),
-                predicted_days_left=predicted_days,
-                recommended_quantity=recommended_qty,
-            )
-        )
-
-    suggestions.sort(key=lambda item: item.predicted_days_left)
-    return suggestions
 
 
 def _schedule_notification(**kwargs) -> None:
@@ -365,7 +169,7 @@ async def get_low_stock_suggestions(
             or []
         )
 
-        suggestions = _build_low_stock_suggestions(
+        suggestions = build_low_stock_suggestions(
             inventory_rows=inventory_rows,
             consumption_rows=consumption_rows,
             pending_shopping_rows=pending_rows,
@@ -397,7 +201,7 @@ async def add_low_stock_suggestions(
             db=db,
         )
         aggregated = {
-            item.name.strip().lower(): {
+            normalize_name(item.name): {
                 "name": item.name,
                 "quantity": item.recommended_quantity,
                 "unit": item.unit,
@@ -408,7 +212,7 @@ async def add_low_stock_suggestions(
         if not aggregated:
             return AddShoppingItemsResponse(success=True, added_count=0, updated_count=0, items=[])
 
-        added_count, updated_count, touched_rows = _upsert_pending_shopping_items(
+        added_count, updated_count, touched_rows = upsert_pending_shopping_items(
             db=db,
             device_id=device_id,
             aggregated=aggregated,
@@ -446,10 +250,22 @@ async def add_low_stock_suggestions(
 
 @router.post("/items", response_model=AddShoppingItemsResponse)
 async def add_shopping_items(
+    request_context: Request,
     request: AddShoppingItemsRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     try:
         if not request.items:
             raise HTTPException(
@@ -457,14 +273,14 @@ async def add_shopping_items(
                 detail="At least one item is required.",
             )
 
-        aggregated = _aggregate_items(request.items)
+        aggregated = aggregate_shopping_items(request.items)
         if not aggregated:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid item payload provided.",
             )
 
-        added_count, updated_count, touched_rows = _upsert_pending_shopping_items(
+        added_count, updated_count, touched_rows = upsert_pending_shopping_items(
             db=db,
             device_id=device_id,
             aggregated=aggregated,
@@ -482,12 +298,22 @@ async def add_shopping_items(
             metadata={"added_count": added_count, "updated_count": updated_count},
         )
 
-        return AddShoppingItemsResponse(
+        response = AddShoppingItemsResponse(
             success=True,
             added_count=added_count,
             updated_count=updated_count,
             items=[ShoppingItem(**row) for row in touched_rows],
         )
+        save_idempotent_response(
+            db,
+            device_id=device_id,
+            method=request_context.method,
+            path=request_context.url.path,
+            idempotency_key=x_idempotency_key,
+            status_code=status.HTTP_200_OK,
+            payload=response.model_dump(mode="json"),
+        )
+        return response
     except HTTPException:
         raise
     except Exception as exc:
@@ -501,10 +327,22 @@ async def add_shopping_items(
 
 @router.post("/from-recipe", response_model=AddShoppingItemsResponse)
 async def add_shopping_from_recipe(
+    request_context: Request,
     request: AddShoppingFromRecipeRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     try:
         if not request.ingredients:
             raise HTTPException(
@@ -512,14 +350,14 @@ async def add_shopping_from_recipe(
                 detail="At least one ingredient is required.",
             )
 
-        aggregated = _aggregate_items(request.ingredients)
+        aggregated = aggregate_shopping_items(request.ingredients)
         if not aggregated:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid ingredient payload provided.",
             )
 
-        added_count, updated_count, touched_rows = _upsert_pending_shopping_items(
+        added_count, updated_count, touched_rows = upsert_pending_shopping_items(
             db=db,
             device_id=device_id,
             aggregated=aggregated,
@@ -537,12 +375,22 @@ async def add_shopping_from_recipe(
             metadata={"recipe_id": request.recipe_id, "count": added_count + updated_count},
         )
 
-        return AddShoppingItemsResponse(
+        response = AddShoppingItemsResponse(
             success=True,
             added_count=added_count,
             updated_count=updated_count,
             items=[ShoppingItem(**row) for row in touched_rows],
         )
+        save_idempotent_response(
+            db,
+            device_id=device_id,
+            method=request_context.method,
+            path=request_context.url.path,
+            idempotency_key=x_idempotency_key,
+            status_code=status.HTTP_200_OK,
+            payload=response.model_dump(mode="json"),
+        )
+        return response
     except HTTPException:
         raise
     except Exception as exc:
@@ -556,10 +404,22 @@ async def add_shopping_from_recipe(
 
 @router.post("/checkout", response_model=ShoppingCheckoutResponse)
 async def checkout_shopping_items(
+    request_context: Request,
     request: ShoppingCheckoutRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     try:
         query = (
             db.table("shopping_items")
@@ -572,20 +432,30 @@ async def checkout_shopping_items(
         pending_rows = query.execute().data or []
 
         if not pending_rows:
-            return ShoppingCheckoutResponse(
+            response = ShoppingCheckoutResponse(
                 success=True,
                 checked_out_count=0,
                 added_count=0,
                 updated_count=0,
                 inventory_items=[],
             )
+            save_idempotent_response(
+                db,
+                device_id=device_id,
+                method=request_context.method,
+                path=request_context.url.path,
+                idempotency_key=x_idempotency_key,
+                status_code=status.HTTP_200_OK,
+                payload=response.model_dump(mode="json"),
+            )
+            return response
 
         added_count = 0
         updated_count = 0
         inventory_items: list[InventoryItem] = []
 
         if request.add_to_inventory:
-            added_count, updated_count, inventory_items = _apply_inventory_from_shopping(
+            added_count, updated_count, inventory_items = apply_inventory_from_shopping(
                 db=db,
                 device_id=device_id,
                 shopping_rows=pending_rows,
@@ -629,13 +499,23 @@ async def checkout_shopping_items(
                 metadata={"checked_out_count": len(checked_out_ids)},
             )
 
-        return ShoppingCheckoutResponse(
+        response = ShoppingCheckoutResponse(
             success=True,
             checked_out_count=len(checked_out_ids),
             added_count=added_count,
             updated_count=updated_count,
             inventory_items=inventory_items,
         )
+        save_idempotent_response(
+            db,
+            device_id=device_id,
+            method=request_context.method,
+            path=request_context.url.path,
+            idempotency_key=x_idempotency_key,
+            status_code=status.HTTP_200_OK,
+            payload=response.model_dump(mode="json"),
+        )
+        return response
     except HTTPException:
         raise
     except Exception as exc:
@@ -679,7 +559,7 @@ async def update_shopping_item(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than or equal to 0.")
             updates["quantity"] = round(float(request.quantity), 2)
         if request.unit is not None:
-            updates["unit"] = _normalize_unit(request.unit)
+            updates["unit"] = normalize_unit(request.unit)
         if request.status is not None:
             updates["status"] = request.status.value
             if request.status == ShoppingItemStatus.PURCHASED:

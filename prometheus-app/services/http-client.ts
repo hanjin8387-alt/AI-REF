@@ -1,15 +1,13 @@
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { offlineCache } from './offline-cache';
 import { logHttpPerf } from './perf-logger';
 import { parseJsonWithWorker } from '../utils/json-worker';
 import { loadOrCreateDeviceId } from './device-id-storage';
 import { loadDeviceToken, saveDeviceToken } from './device-token-storage';
+import { getAppId, getLegacyAppToken } from './config/runtime';
 
-const APP_TOKEN =
-  process.env.EXPO_PUBLIC_APP_TOKEN ||
-  (Constants.expoConfig?.extra?.appToken as string | undefined) ||
-  '';
+const APP_ID = getAppId();
+const LEGACY_APP_TOKEN = getLegacyAppToken();
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_CLIENT_CACHE_ENTRIES = 200;
 const OFFLINE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -30,6 +28,7 @@ type RequestOptions = RequestInit & {
   idempotencyKey?: string;
   skipRequestDedup?: boolean;
 };
+export type { RequestOptions };
 
 type CacheEntry = {
   expiresAt: number;
@@ -119,7 +118,7 @@ export class HttpClient {
     return result;
   }
 
-  protected invalidateCache(prefixes: string[] = []) {
+  invalidateCache(prefixes: string[] = []) {
     if (!prefixes.length) {
       this.cache.clear();
       this.inflightRequests.clear();
@@ -240,7 +239,7 @@ export class HttpClient {
     }
   }
 
-  protected async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+  async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     if (!options.skipInit) {
       await this.ensureInitialized();
     }
@@ -283,7 +282,11 @@ export class HttpClient {
 
           if (contentType.includes('application/json')) {
             const errorData = await this.parseJsonBody<Record<string, unknown>>(response).catch(() => ({}));
-            detail = String(errorData.detail || errorData.message || detail);
+            const detailMessage =
+              (errorData && typeof errorData === 'object' && (errorData as Record<string, unknown>).detail) ||
+              (errorData && typeof errorData === 'object' && (errorData as Record<string, unknown>).message) ||
+              detail;
+            detail = String(detailMessage);
           } else {
             const errorText = await response.text().catch(() => '');
             if (errorText) detail = errorText;
@@ -455,7 +458,8 @@ export class HttpClient {
 
   private buildHeaders(options: RequestInit, idempotencyKey?: string): Record<string, string> {
     const headers: Record<string, string> = {
-      ...(APP_TOKEN && { 'X-App-Token': APP_TOKEN }),
+      ...(APP_ID && { 'X-App-ID': APP_ID }),
+      ...(LEGACY_APP_TOKEN && { 'X-App-Token': LEGACY_APP_TOKEN }),
       ...(this.deviceId && { 'X-Device-ID': this.deviceId }),
       ...(this.deviceToken && { 'X-Device-Token': this.deviceToken }),
       ...(idempotencyKey && { 'X-Idempotency-Key': idempotencyKey }),

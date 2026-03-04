@@ -1,13 +1,13 @@
 import asyncio
-import base64
 import json
 import logging
 import time
-from typing import List, Optional
+from typing import Any, List, Literal, Optional
 
-import google.generativeai as genai
-from google.api_core.exceptions import NotFound
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
+from google.genai.errors import ClientError
+from pydantic import BaseModel, ValidationError
 
 from ..core.config import get_settings
 from ..schemas.schemas import FoodItem
@@ -15,17 +15,106 @@ from ..schemas.schemas import FoodItem
 logger = logging.getLogger(__name__)
 GEMINI_TIMEOUT_SECONDS = 30
 
+FOOD_ITEM_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "name": {"type": "string"},
+        "quantity": {"type": "number"},
+        "unit": {"type": "string"},
+        "category": {"type": ["string", "null"], "enum": ["냉장", "냉동", "상온", None]},
+        "confidence": {"type": "number"},
+        "unit_price": {"type": ["number", "null"]},
+        "total_price": {"type": ["number", "null"]},
+        "currency": {"type": ["string", "null"]},
+    },
+    "required": ["name"],
+}
+FOOD_ITEMS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": FOOD_ITEM_JSON_SCHEMA,
+}
+RECEIPT_ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "raw_text": {"type": ["string", "null"]},
+        "items": FOOD_ITEMS_JSON_SCHEMA,
+    },
+    "required": ["items"],
+}
+RECIPE_INGREDIENT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "name": {"type": "string"},
+        "quantity": {"type": "number"},
+        "unit": {"type": "string"},
+    },
+    "required": ["name"],
+}
+RECIPE_RECOMMENDATION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "recommendation_reason": {"type": ["string", "null"]},
+        "cooking_time_minutes": {"type": "integer"},
+        "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+        "servings": {"type": "integer"},
+        "ingredients": {"type": "array", "items": RECIPE_INGREDIENT_JSON_SCHEMA},
+        "instructions": {"type": "array", "items": {"type": "string"}},
+        "priority_score": {"type": "number"},
+    },
+    "required": ["id", "title", "description", "ingredients", "instructions"],
+}
+RECIPE_RECOMMENDATIONS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": RECIPE_RECOMMENDATION_JSON_SCHEMA,
+}
+
+
+class GeminiContractError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ReceiptAnalysisPayload(BaseModel):
+    raw_text: str | None = None
+    items: list[FoodItem] = []
+
+
+class GeneratedRecipeIngredientPayload(BaseModel):
+    name: str
+    quantity: float = 1
+    unit: str = "unit"
+
+
+class GeneratedRecipePayload(BaseModel):
+    id: str
+    title: str
+    description: str
+    recommendation_reason: str | None = None
+    cooking_time_minutes: int = 30
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    servings: int = 2
+    ingredients: list[GeneratedRecipeIngredientPayload] = []
+    instructions: list[str] = []
+    priority_score: float = 0.5
+
 
 class GeminiService:
     """Gemini service for image parsing and recipe generation."""
 
     def __init__(self):
         settings = get_settings()
-        genai.configure(api_key=settings.gemini_api_key)
+        self._client = genai.Client(api_key=settings.gemini_api_key)
         self.language = settings.default_language
         self._model_candidates = self._build_model_candidates(settings.gemini_model)
         self._active_model_index = 0
-        self.model = genai.GenerativeModel(self._model_candidates[self._active_model_index])
 
     @property
     def _language_instruction(self) -> str:
@@ -61,8 +150,10 @@ class GeminiService:
 
     @staticmethod
     def _is_model_not_found_error(exc: Exception) -> bool:
-        if isinstance(exc, NotFound):
-            return True
+        if isinstance(exc, ClientError):
+            status = getattr(exc, "status", None)
+            if status is not None and getattr(status, "code", None) == 404:
+                return True
         message = str(exc).lower()
         return "not found for api version" in message or ("model" in message and "not found" in message)
 
@@ -70,21 +161,21 @@ class GeminiService:
         self,
         *,
         contents: list[object],
-        generation_config: GenerationConfig,
+        generation_config: types.GenerateContentConfig,
     ):
         last_model_error: Exception | None = None
         for idx in range(self._active_model_index, len(self._model_candidates)):
             model_name = self._model_candidates[idx]
             if idx != self._active_model_index:
                 self._active_model_index = idx
-                self.model = genai.GenerativeModel(model_name)
 
             started = time.perf_counter()
             try:
                 response = await asyncio.wait_for(
-                    self.model.generate_content_async(
+                    self._client.aio.models.generate_content(
+                        model=model_name,
                         contents=contents,
-                        generation_config=generation_config,
+                        config=generation_config,
                     ),
                     timeout=GEMINI_TIMEOUT_SECONDS,
                 )
@@ -115,6 +206,21 @@ class GeminiService:
             raise last_model_error
         raise RuntimeError("No Gemini model candidates configured")
 
+    def _load_json_payload(self, *, response_text: str | None, context: str) -> object:
+        if not response_text:
+            raise GeminiContractError("empty_response", f"Gemini {context} returned an empty response.")
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "%s parse failed response_chars=%s preview=%s",
+                context,
+                len(response_text or ""),
+                self._response_preview(response_text),
+                exc_info=True,
+            )
+            raise GeminiContractError("invalid_json", f"Gemini {context} returned invalid JSON.") from exc
+
     async def analyze_food_image(
         self, image_bytes: bytes, mime_type: str = "image/jpeg"
     ) -> List[FoodItem]:
@@ -139,28 +245,34 @@ Do not return any non-JSON text."""
 
         response = await self._generate_with_model_fallback(
             contents=[
-                {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()},
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 prompt,
             ],
-            generation_config=GenerationConfig(
+            generation_config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=FOOD_ITEMS_JSON_SCHEMA,
                 temperature=0.2,
             ),
         )
 
+        items_data = self._load_json_payload(
+            response_text=getattr(response, "text", None),
+            context="food analysis",
+        )
+
+        if not isinstance(items_data, list):
+            raise GeminiContractError("invalid_shape", "Gemini food analysis payload must be a JSON array.")
+
         try:
-            items_data = json.loads(response.text)
-            if not isinstance(items_data, list):
-                return []
             return [FoodItem(**item) for item in items_data]
-        except Exception:
+        except ValidationError as exc:
             logger.warning(
-                "analyze_food_image parse failed response_chars=%s preview=%s",
+                "analyze_food_image schema failed response_chars=%s preview=%s",
                 len(response.text or ""),
                 self._response_preview(response.text),
                 exc_info=True,
             )
-            return []
+            raise GeminiContractError("schema_validation_failed", "Gemini food analysis payload failed schema validation.") from exc
 
     async def analyze_receipt_image(
         self, image_bytes: bytes, mime_type: str = "image/jpeg"
@@ -192,42 +304,39 @@ Rules:
 
         response = await self._generate_with_model_fallback(
             contents=[
-                {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()},
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 prompt,
             ],
-            generation_config=GenerationConfig(
+            generation_config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=RECEIPT_ANALYSIS_JSON_SCHEMA,
                 temperature=0.1,
             ),
         )
 
+        payload = self._load_json_payload(
+            response_text=getattr(response, "text", None),
+            context="receipt analysis",
+        )
+
+        if not isinstance(payload, dict):
+            raise GeminiContractError("invalid_shape", "Gemini receipt analysis payload must be a JSON object.")
+
         try:
-            payload = json.loads(response.text)
-
-            # Backward compatibility: model may still return array.
-            if isinstance(payload, list):
-                return [FoodItem(**item) for item in payload], None
-
-            if not isinstance(payload, dict):
-                return [], None
-
-            items_data = payload.get("items", [])
-            raw_text = payload.get("raw_text")
-
-            if not isinstance(items_data, list):
-                items_data = []
-            if raw_text is not None:
-                raw_text = str(raw_text).strip() or None
-
-            return [FoodItem(**item) for item in items_data], raw_text
-        except Exception:
+            parsed_payload = ReceiptAnalysisPayload(**payload)
+        except ValidationError as exc:
             logger.warning(
-                "analyze_receipt_image parse failed response_chars=%s preview=%s",
+                "analyze_receipt_image schema failed response_chars=%s preview=%s",
                 len(response.text or ""),
                 self._response_preview(response.text),
                 exc_info=True,
             )
-            return [], None
+            raise GeminiContractError("schema_validation_failed", "Gemini receipt payload failed schema validation.") from exc
+
+        raw_text = parsed_payload.raw_text
+        if raw_text is not None:
+            raw_text = str(raw_text).strip() or None
+        return parsed_payload.items, raw_text
 
     @staticmethod
     def _coerce_expiry_days(value: object) -> int:
@@ -300,25 +409,31 @@ Return JSON array only:
 
         response = await self._generate_with_model_fallback(
             contents=[prompt],
-            generation_config=GenerationConfig(
+            generation_config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=RECIPE_RECOMMENDATIONS_JSON_SCHEMA,
                 temperature=0.7,
             ),
         )
 
+        recipes = self._load_json_payload(
+            response_text=getattr(response, "text", None),
+            context="recipe recommendation",
+        )
+
+        if not isinstance(recipes, list):
+            raise GeminiContractError("invalid_shape", "Gemini recipe response must be a JSON array.")
         try:
-            recipes = json.loads(response.text)
-            if isinstance(recipes, list):
-                return recipes
-            return []
-        except Exception:
+            parsed_recipes = [GeneratedRecipePayload(**recipe) for recipe in recipes]
+        except ValidationError as exc:
             logger.warning(
-                "generate_recipe_recommendations parse failed response_chars=%s preview=%s",
-                len(response.text or ""),
-                self._response_preview(response.text),
+                "generate_recipe_recommendations schema failed response_chars=%s preview=%s",
+                len(getattr(response, "text", "") or ""),
+                self._response_preview(getattr(response, "text", None)),
                 exc_info=True,
             )
-            return []
+            raise GeminiContractError("schema_validation_failed", "Gemini recipe payload failed schema validation.") from exc
+        return [recipe.model_dump(mode="json") for recipe in parsed_recipes]
 
 
 _gemini_service: Optional[GeminiService] = None

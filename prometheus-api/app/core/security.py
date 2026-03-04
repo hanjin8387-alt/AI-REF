@@ -1,7 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import secrets
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -12,21 +13,52 @@ from .database import get_db
 
 
 def require_app_token(
+    x_app_id: Annotated[str | None, Header(alias="X-App-ID")] = None,
     x_app_token: Annotated[str | None, Header(alias="X-App-Token")] = None,
 ) -> None:
-    """Validate shared family app token."""
+    """Validate public app identity with optional legacy token compatibility."""
     settings = get_settings()
 
-    if not settings.require_app_token:
+    if x_app_id:
+        app_id = x_app_id.strip().lower()
+        if not app_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="X-App-ID header is required",
+            )
+
+        allowed_app_ids = settings.parsed_app_ids
+        if allowed_app_ids and app_id not in allowed_app_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unknown app id",
+            )
         return
+
+    if not settings.allow_legacy_app_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-App-ID header is required",
+        )
+
+    if not x_app_token:
+        if settings.require_app_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="X-App-ID or legacy X-App-Token header is required",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-App-ID header is required",
+        )
 
     if not settings.app_token:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server APP_TOKEN is not configured",
+            detail="Server legacy APP_TOKEN is not configured",
         )
 
-    if not x_app_token or not secrets.compare_digest(x_app_token, settings.app_token):
+    if not secrets.compare_digest(x_app_token, settings.app_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid app token",
@@ -69,6 +101,27 @@ def issue_device_token() -> tuple[str, str]:
     return raw_token, hash_device_token(raw_token)
 
 
+def _parse_timestamp(raw_value: object) -> datetime | None:
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, datetime):
+        return raw_value if raw_value.tzinfo else raw_value.replace(tzinfo=timezone.utc)
+
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def require_device_auth(
     device_id: str = Depends(get_device_id),
     db: Client = Depends(get_db),
@@ -82,7 +135,7 @@ def require_device_auth(
 
     rows = (
         db.table("devices")
-        .select("device_secret_hash")
+        .select("device_secret_hash,token_version,token_expires_at,token_revoked_at,last_used_at")
         .eq("device_id", device_id)
         .limit(1)
         .execute()
@@ -102,5 +155,26 @@ def require_device_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid device token",
         )
+
+    now = datetime.now(timezone.utc)
+    token_expires_at = _parse_timestamp(rows[0].get("token_expires_at"))
+    if token_expires_at and token_expires_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Device token expired",
+        )
+
+    token_revoked_at = _parse_timestamp(rows[0].get("token_revoked_at"))
+    if token_revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Device token revoked",
+        )
+
+    try:
+        db.table("devices").update({"last_used_at": now.isoformat()}).eq("device_id", device_id).execute()
+    except Exception:
+        # Best-effort observability field; auth should not fail if update fails.
+        pass
 
     return device_id

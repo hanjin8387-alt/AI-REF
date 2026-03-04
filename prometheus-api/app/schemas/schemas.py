@@ -25,6 +25,12 @@ class NotificationType(str, Enum):
     SYSTEM = "system"
 
 
+class OperationStatus(str, Enum):
+    OK = "ok"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+
+
 class DeviceRegisterRequest(BaseModel):
     device_id: str = Field(..., description="Unique device identifier")
     push_token: Optional[str] = Field(None, description="FCM push token")
@@ -37,20 +43,39 @@ class DeviceRegisterResponse(BaseModel):
     device_id: str
     message: str
     device_token: str
+    token_version: int = 1
+    token_expires_at: datetime
 
 
 class BootstrapResponse(BaseModel):
     api_ok: bool
     token_required: bool
+    app_id_required: bool = True
     device_registered: bool
     sync_pending_count: int = 0
     last_sync_at: Optional[datetime] = None
+
+
+class DeviceTokenRotateResponse(BaseModel):
+    success: bool
+    device_id: str
+    device_token: str
+    token_version: int
+    token_expires_at: datetime
+
+
+class DeviceTokenRevokeResponse(BaseModel):
+    success: bool
+    device_id: str
+    message: str
 
 
 class ScanUploadResponse(BaseModel):
     scan_id: str
     status: ScanStatus
     message: str
+    result_status: OperationStatus = OperationStatus.OK
+    warnings: List[str] = Field(default_factory=list)
 
 
 class FoodItem(BaseModel):
@@ -78,6 +103,7 @@ class ScanResultResponse(BaseModel):
 class InventoryItem(BaseModel):
     id: Optional[str] = None
     name: str
+    name_normalized: Optional[str] = None
     quantity: float
     unit: str
     expiry_date: Optional[datetime] = None
@@ -406,15 +432,28 @@ class BackupRestoreRequest(BaseModel):
     mode: str = Field(default="merge", description="merge | replace")
 
 
+class BackupTableResult(BaseModel):
+    table: str
+    status: OperationStatus
+    row_count: int = 0
+    error: Optional[str] = None
+
+
 class BackupRestoreResponse(BaseModel):
     success: bool
     message: str
+    status: OperationStatus = OperationStatus.OK
+    warnings: List[str] = Field(default_factory=list)
     restored_counts: dict[str, int] = Field(default_factory=dict)
+    table_results: List[BackupTableResult] = Field(default_factory=list)
 
 
 class BackupExportResponse(BaseModel):
     success: bool
     exported_at: datetime
+    status: OperationStatus = OperationStatus.OK
+    warnings: List[str] = Field(default_factory=list)
+    table_results: List[BackupTableResult] = Field(default_factory=list)
     payload: dict[str, Any]
 
 

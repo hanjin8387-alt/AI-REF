@@ -2,11 +2,13 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from supabase import Client
 
 from ..core.db_columns import INVENTORY_SELECT_COLUMNS
 from ..core.database import get_db
+from ..core.idempotency import load_idempotent_response, save_idempotent_response
+from ..core.normalization import normalize_item_name
 from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     BulkInventoryRequest,
@@ -82,10 +84,22 @@ async def get_inventory(
 
 @router.post("/bulk", response_model=BulkInventoryResponse)
 async def bulk_add_inventory(
+    request_context: Request,
     request: BulkInventoryRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     if not request.items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -106,7 +120,17 @@ async def bulk_add_inventory(
     added_count, updated_count, items = bulk_upsert_inventory(db, device_id, raw_items)
 
     if added_count == 0 and updated_count == 0:
-        return BulkInventoryResponse(success=True, added_count=0, updated_count=0, items=[])
+        response = BulkInventoryResponse(success=True, added_count=0, updated_count=0, items=[])
+        save_idempotent_response(
+            db,
+            device_id=device_id,
+            method=request_context.method,
+            path=request_context.url.path,
+            idempotency_key=x_idempotency_key,
+            status_code=status.HTTP_200_OK,
+            payload=response.model_dump(mode="json"),
+        )
+        return response
 
     create_notification(
         db=db,
@@ -117,12 +141,22 @@ async def bulk_add_inventory(
         metadata={"added_count": added_count, "updated_count": updated_count},
     )
 
-    return BulkInventoryResponse(
+    response = BulkInventoryResponse(
         success=True,
         added_count=added_count,
         updated_count=updated_count,
         items=items,
     )
+    save_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+        status_code=status.HTTP_200_OK,
+        payload=response.model_dump(mode="json"),
+    )
+    return response
 
 
 @router.put("/{item_id}", response_model=InventoryItem)
@@ -149,6 +183,7 @@ async def update_inventory_item(
         if not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
         updates["name"] = name
+        updates["name_normalized"] = normalize_item_name(name)
     if request.quantity is not None:
         if request.quantity < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than or equal to 0.")
@@ -241,19 +276,32 @@ async def delete_inventory_item(
 
 @router.post("/restore", response_model=InventoryItem)
 async def restore_inventory_item(
+    request_context: Request,
     request: InventoryRestoreRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
+    normalized_name = normalize_item_name(name)
 
     existing = (
         db.table("inventory")
         .select(INVENTORY_SELECT_COLUMNS)
         .eq("device_id", device_id)
-        .eq("name", name)
+        .eq("name_normalized", normalized_name)
         .limit(1)
         .execute()
     )
@@ -269,6 +317,7 @@ async def restore_inventory_item(
                     "quantity": float(row.get("quantity", 0)) + max(float(request.quantity), 0.0),
                     "unit": request.unit.strip() or row.get("unit") or "개",
                     "expiry_date": expiry_date or row.get("expiry_date"),
+                    "name_normalized": normalized_name,
                     "category": normalized_category if request.category is not None else row.get("category"),
                 }
             )
@@ -286,6 +335,7 @@ async def restore_inventory_item(
                 {
                     "device_id": device_id,
                     "name": name,
+                    "name_normalized": normalized_name,
                     "quantity": max(float(request.quantity), 0.0),
                     "unit": request.unit.strip() or "개",
                     "expiry_date": expiry_date,
@@ -312,6 +362,15 @@ async def restore_inventory_item(
         metadata={"item_id": restored.id, "name": restored.name},
     )
 
+    save_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+        status_code=status.HTTP_200_OK,
+        payload=restored.model_dump(mode="json"),
+    )
     return restored
 
 

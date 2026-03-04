@@ -34,7 +34,7 @@ DEFAULT_CACHE_CONTROL = "private, max-age=15, stale-while-revalidate=30"
 async def lifespan(app: FastAPI):
     settings = get_settings()
     missing = []
-    if settings.require_app_token and not settings.app_token:
+    if settings.allow_legacy_app_token and settings.require_app_token and not settings.app_token:
         missing.append("APP_TOKEN")
     if settings.is_production_like and not settings.admin_token:
         missing.append("ADMIN_TOKEN")
@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
         missing.append("SUPABASE_KEY")
     if not settings.gemini_api_key:
         missing.append("GEMINI_API_KEY")
+    if not settings.parsed_app_ids:
+        missing.append("APP_IDS")
     if missing:
         raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
     if not settings.parsed_cors_origins:
@@ -52,9 +54,6 @@ async def lifespan(app: FastAPI):
     # Prevent wildcard CORS in production-like environments.
     if settings.is_production_like and settings.cors_origins.strip() == "*":
         raise RuntimeError("CORS_ORIGINS must not be '*' in production-like environments")
-    if settings.is_production_like and not settings.require_app_token and not settings.parsed_allowed_device_ids:
-        raise RuntimeError("ALLOWED_DEVICE_IDS must be set when REQUIRE_APP_TOKEN is false in production-like environments")
-
     logging.basicConfig(
         level=logging.DEBUG if settings.debug else logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",

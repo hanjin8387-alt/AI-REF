@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from supabase import Client
@@ -13,17 +13,19 @@ from supabase import Client
 from ..core.config import get_settings
 from ..core.db_columns import SCAN_SELECT_COLUMNS
 from ..core.database import get_db
+from ..core.idempotency import load_idempotent_response, save_idempotent_response
 from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     BarcodeProductInfo,
     BarcodeResponse,
     FoodItem,
+    OperationStatus,
     ScanResultResponse,
     ScanSourceType,
     ScanStatus,
     ScanUploadResponse,
 )
-from ..services.gemini_service import GeminiService, get_gemini_service
+from ..services.gemini_service import GeminiContractError, GeminiService, get_gemini_service
 from ..services.storage_utils import STORAGE_CATEGORIES, guess_storage_from_name, normalize_storage_category
 
 logger = logging.getLogger(__name__)
@@ -221,10 +223,21 @@ async def upload_scan(
     request: Request,
     file: UploadFile = File(...),
     source_type: ScanSourceType = ScanSourceType.CAMERA,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
 ):
+    replayed = load_idempotent_response(
+        db,
+        device_id=device_id,
+        method=request.method,
+        path=request.url.path,
+        idempotency_key=x_idempotency_key,
+    )
+    if replayed is not None:
+        return replayed
+
     settings = get_settings()
     scan_id = str(uuid.uuid4())
 
@@ -298,11 +311,40 @@ async def upload_scan(
                 purchased_on=receipt_purchased_on,
             )
 
-        return ScanUploadResponse(
+        response = ScanUploadResponse(
             scan_id=scan_id,
             status=ScanStatus.COMPLETED,
             message=f"{len(items)}개 항목을 감지했어요.",
+            result_status=OperationStatus.OK,
+            warnings=[],
         )
+        save_idempotent_response(
+            db,
+            device_id=device_id,
+            method=request.method,
+            path=request.url.path,
+            idempotency_key=x_idempotency_key,
+            status_code=status.HTTP_200_OK,
+            payload=response.model_dump(mode="json"),
+        )
+        return response
+    except GeminiContractError as exc:
+        logger.exception("scan upload failed due to gemini contract scan_id=%s device_id=%s", scan_id, device_id)
+        db.table("scans").update(
+            {
+                "status": ScanStatus.FAILED.value,
+                "error_message": "AI response validation failed.",
+            }
+        ).eq("id", scan_id).eq("device_id", device_id).execute()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "status": "failed",
+                "error_code": exc.code,
+                "message": str(exc),
+                "warnings": ["No inventory updates were applied."],
+            },
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
