@@ -8,6 +8,7 @@ from supabase import Client
 
 from ..core.config import get_settings
 from ..core.database import get_db
+from ..core.legacy_auth_observability import get_legacy_auth_event_counts
 from ..schemas.schemas import ExpiryCheckResponse, NotificationType
 from ..services.fcm_service import send_push_to_many
 from ..services.notifications import create_notification
@@ -187,3 +188,12 @@ async def check_expiring_items(
         notifications_sent=notifications_sent,
         errors=errors,
     )
+
+
+@router.get("/legacy-auth-metrics")
+async def get_legacy_auth_metrics(
+    _: None = Depends(_require_admin_token),
+):
+    return {
+        "legacy_auth_events": get_legacy_auth_event_counts(),
+    }

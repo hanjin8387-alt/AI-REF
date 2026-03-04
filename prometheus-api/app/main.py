@@ -34,7 +34,7 @@ DEFAULT_CACHE_CONTROL = "private, max-age=15, stale-while-revalidate=30"
 async def lifespan(app: FastAPI):
     settings = get_settings()
     missing = []
-    if settings.allow_legacy_app_token and settings.require_app_token and not settings.app_token:
+    if settings.allow_legacy_app_token and not settings.app_token:
         missing.append("APP_TOKEN")
     if settings.is_production_like and not settings.admin_token:
         missing.append("ADMIN_TOKEN")

@@ -71,6 +71,7 @@ async def bootstrap(
             api_ok=True,
             token_required=settings.require_app_token and settings.allow_legacy_app_token,
             app_id_required=True,
+            legacy_app_token_enabled=settings.allow_legacy_app_token,
             device_registered=bool(device_rows),
             sync_pending_count=0,
             last_sync_at=None,

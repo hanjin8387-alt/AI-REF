@@ -10,6 +10,7 @@ from supabase import Client
 
 from .config import get_settings
 from .database import get_db
+from .legacy_auth_observability import record_legacy_auth_event
 
 
 def require_app_token(
@@ -36,6 +37,8 @@ def require_app_token(
         return
 
     if not settings.allow_legacy_app_token:
+        if x_app_token:
+            record_legacy_auth_event(outcome="rejected", reason="compat_disabled")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="X-App-ID header is required",
@@ -53,16 +56,20 @@ def require_app_token(
         )
 
     if not settings.app_token:
+        record_legacy_auth_event(outcome="rejected", reason="server_unconfigured")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server legacy APP_TOKEN is not configured",
         )
 
     if not secrets.compare_digest(x_app_token, settings.app_token):
+        record_legacy_auth_event(outcome="rejected", reason="invalid_token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid app token",
         )
+
+    record_legacy_auth_event(outcome="accepted", reason="legacy_compat")
 
 
 def get_device_id(

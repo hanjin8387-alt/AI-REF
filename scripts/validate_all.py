@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass
+class StepResult:
+    name: str
+    command: str
+    cwd: str
+    log_file: str
+    started_at: str
+    ended_at: str
+    duration_seconds: float
+    exit_code: int
+    status: str
+
+
+def _timestamp() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def run_step(name: str, command: list[str], cwd: Path, log_file: Path) -> StepResult:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    started_at = _timestamp()
+    started = datetime.now().astimezone()
+
+    with log_file.open("w", encoding="utf-8") as fp:
+        fp.write(f"$ {shlex.join(command)}\n")
+        fp.write(f"cwd={cwd}\n\n")
+        process = subprocess.run(
+            command,
+            cwd=str(cwd),
+            stdout=fp,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+
+    ended = datetime.now().astimezone()
+    duration = (ended - started).total_seconds()
+    ended_at = _timestamp()
+    status = "passed" if process.returncode == 0 else "failed"
+
+    return StepResult(
+        name=name,
+        command=shlex.join(command),
+        cwd=str(cwd),
+        log_file=str(log_file.relative_to(REPO_ROOT)),
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=duration,
+        exit_code=process.returncode,
+        status=status,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run reproducible repository validation checks.")
+    parser.add_argument(
+        "--mode",
+        choices=["all", "backend", "frontend", "docs"],
+        default="all",
+        help="Validation slice to run.",
+    )
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
+        help="Skip dependency install steps and run checks only.",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        default=os.environ.get("VALIDATION_ARTIFACT_DIR", "artifacts"),
+        help="Artifact directory relative to repo root or absolute path.",
+    )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    artifact_dir = Path(args.artifact_dir)
+    if not artifact_dir.is_absolute():
+        artifact_dir = REPO_ROOT / artifact_dir
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    started_at = _timestamp()
+    started = datetime.now().astimezone()
+    steps: list[StepResult] = []
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+
+    def run(name: str, command: list[str], cwd: Path, log_path: Path) -> int:
+        result = run_step(name, command, cwd, log_path)
+        steps.append(result)
+        print(f"[{result.status.upper()}] {name} (exit={result.exit_code})")
+        return result.exit_code
+
+    # Backend
+    if args.mode in {"all", "backend"}:
+        backend_artifacts = artifact_dir / "backend"
+        backend_artifacts.mkdir(parents=True, exist_ok=True)
+        if not args.skip_install:
+            exit_code = run(
+                "backend-install",
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    "requirements.txt",
+                    "-r",
+                    "requirements-dev.txt",
+                ],
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-install.log",
+            )
+            if exit_code != 0:
+                return write_summary_and_exit(
+                    artifact_dir=artifact_dir,
+                    mode=args.mode,
+                    started_at=started_at,
+                    started=started,
+                    steps=steps,
+                    exit_code=exit_code,
+                )
+
+        exit_code = run(
+            "backend-test",
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "tests",
+                f"--junitxml={str((backend_artifacts / 'junit.xml').resolve())}",
+            ],
+            REPO_ROOT / "prometheus-api",
+            backend_artifacts / "backend-test.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+    # Frontend
+    if args.mode in {"all", "frontend"}:
+        frontend_artifacts = artifact_dir / "frontend"
+        frontend_artifacts.mkdir(parents=True, exist_ok=True)
+        if not args.skip_install:
+            exit_code = run(
+                "frontend-install",
+                [npm_cmd, "ci"],
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-install.log",
+            )
+            if exit_code != 0:
+                return write_summary_and_exit(
+                    artifact_dir=artifact_dir,
+                    mode=args.mode,
+                    started_at=started_at,
+                    started=started,
+                    steps=steps,
+                    exit_code=exit_code,
+                )
+
+        exit_code = run(
+            "frontend-typecheck",
+            [npm_cmd, "run", "typecheck"],
+            REPO_ROOT / "prometheus-app",
+            frontend_artifacts / "frontend-typecheck.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+        exit_code = run(
+            "frontend-test",
+            [npm_cmd, "run", "test:ci"],
+            REPO_ROOT / "prometheus-app",
+            frontend_artifacts / "frontend-test.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+    # Docs / drift / optional smoke
+    if args.mode in {"all", "docs"}:
+        docs_artifacts = artifact_dir / "docs"
+        docs_artifacts.mkdir(parents=True, exist_ok=True)
+
+        exit_code = run(
+            "docs-check-config-drift",
+            [
+                sys.executable,
+                "scripts/check_config_drift.py",
+                "--output",
+                str((docs_artifacts / "config-drift.json").resolve()),
+            ],
+            REPO_ROOT,
+            docs_artifacts / "check-config-drift.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+        exit_code = run(
+            "docs-validate-readme-commands",
+            [
+                sys.executable,
+                "scripts/validate_readme_commands.py",
+                "--output",
+                str((docs_artifacts / "readme-command-check.json").resolve()),
+            ],
+            REPO_ROOT,
+            docs_artifacts / "validate-readme-commands.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+        exit_code = run(
+            "docs-optional-smoke",
+            [
+                sys.executable,
+                "scripts/optional_integration_smoke.py",
+                "--output",
+                str((docs_artifacts / "optional-smoke.json").resolve()),
+            ],
+            REPO_ROOT,
+            docs_artifacts / "optional-smoke.log",
+        )
+        if exit_code != 0:
+            return write_summary_and_exit(
+                artifact_dir=artifact_dir,
+                mode=args.mode,
+                started_at=started_at,
+                started=started,
+                steps=steps,
+                exit_code=exit_code,
+            )
+
+    return write_summary_and_exit(
+        artifact_dir=artifact_dir,
+        mode=args.mode,
+        started_at=started_at,
+        started=started,
+        steps=steps,
+        exit_code=0,
+    )
+
+
+def write_summary_and_exit(
+    *,
+    artifact_dir: Path,
+    mode: str,
+    started_at: str,
+    started: datetime,
+    steps: list[StepResult],
+    exit_code: int,
+) -> int:
+    ended = datetime.now().astimezone()
+    ended_at = _timestamp()
+    summary = {
+        "mode": mode,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_seconds": (ended - started).total_seconds(),
+        "exit_code": exit_code,
+        "status": "passed" if exit_code == 0 else "failed",
+        "steps": [step.__dict__ for step in steps],
+    }
+    summary_path = artifact_dir / "validation-summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"Validation summary: {summary_path}")
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

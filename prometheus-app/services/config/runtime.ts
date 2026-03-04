@@ -1,8 +1,10 @@
 import Constants from 'expo-constants';
+import { isLegacyAppTokenEnabled as resolveLegacyEnabled, resolveLegacyAppToken } from './legacy-auth';
 
 type ExtraConfig = {
   apiUrl?: string;
   appId?: string;
+  enableLegacyAppToken?: boolean | string;
   legacyAppToken?: string;
 };
 
@@ -26,9 +28,20 @@ export function getAppId(): string {
   return (fromEnv || fromConfig || 'prometheus-app').trim();
 }
 
+export function isLegacyAppTokenEnabled(): boolean {
+  const extra = readExtraConfig();
+  return resolveLegacyEnabled({
+    envLegacyEnabled: process.env.EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN,
+    configLegacyEnabled: extra.enableLegacyAppToken,
+  });
+}
+
 export function getLegacyAppToken(): string {
   const extra = readExtraConfig();
-  const fromEnv = process.env.EXPO_PUBLIC_APP_TOKEN;
-  const fromConfig = extra.legacyAppToken;
-  return (fromEnv || fromConfig || '').trim();
+  return resolveLegacyAppToken({
+    envLegacyEnabled: process.env.EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN,
+    configLegacyEnabled: extra.enableLegacyAppToken,
+    envLegacyToken: process.env.EXPO_PUBLIC_APP_TOKEN,
+    configLegacyToken: extra.legacyAppToken,
+  });
 }

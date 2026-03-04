@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "development"
     app_ids: str = "prometheus-app,prometheus-web"
-    allow_legacy_app_token: bool = True
+    allow_legacy_app_token: bool = False
     require_app_token: bool = False
     app_token: str = ""
     admin_token: str = ""
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Gemini API
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model: str = "gemini-2.5-flash"
 
     # Supabase
     supabase_url: str = ""

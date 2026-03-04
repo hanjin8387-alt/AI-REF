@@ -47,6 +47,7 @@ coverage/
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+artifacts/
 
 # ── AI agent artefacts (local only) ─────────────────────────────────────────
 .ai/

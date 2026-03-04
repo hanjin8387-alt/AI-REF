@@ -64,6 +64,7 @@
     "extra": {
       "apiUrl": "http://localhost:8000",
       "appId": "prometheus-app",
+      "enableLegacyAppToken": false,
       "legacyAppToken": ""
     }
   }

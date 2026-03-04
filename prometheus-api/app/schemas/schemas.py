@@ -51,6 +51,7 @@ class BootstrapResponse(BaseModel):
     api_ok: bool
     token_required: bool
     app_id_required: bool = True
+    legacy_app_token_enabled: bool = False
     device_registered: bool
     sync_pending_count: int = 0
     last_sync_at: Optional[datetime] = None

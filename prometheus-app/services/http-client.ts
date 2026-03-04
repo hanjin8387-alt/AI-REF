@@ -5,6 +5,7 @@ import { parseJsonWithWorker } from '../utils/json-worker';
 import { loadOrCreateDeviceId } from './device-id-storage';
 import { loadDeviceToken, saveDeviceToken } from './device-token-storage';
 import { getAppId, getLegacyAppToken } from './config/runtime';
+import { buildAppAuthHeaders } from './auth-headers';
 
 const APP_ID = getAppId();
 const LEGACY_APP_TOKEN = getLegacyAppToken();
@@ -458,8 +459,7 @@ export class HttpClient {
 
   private buildHeaders(options: RequestInit, idempotencyKey?: string): Record<string, string> {
     const headers: Record<string, string> = {
-      ...(APP_ID && { 'X-App-ID': APP_ID }),
-      ...(LEGACY_APP_TOKEN && { 'X-App-Token': LEGACY_APP_TOKEN }),
+      ...buildAppAuthHeaders(APP_ID, LEGACY_APP_TOKEN),
       ...(this.deviceId && { 'X-Device-ID': this.deviceId }),
       ...(this.deviceToken && { 'X-Device-Token': this.deviceToken }),
       ...(idempotencyKey && { 'X-Idempotency-Key': idempotencyKey }),
