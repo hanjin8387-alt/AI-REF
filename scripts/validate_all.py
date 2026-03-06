@@ -67,6 +67,23 @@ def run_step(name: str, command: list[str], cwd: Path, log_file: Path) -> StepRe
     )
 
 
+def skipped_step(name: str, cwd: Path, log_file: Path, reason: str) -> StepResult:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    started_at = _timestamp()
+    log_file.write_text(reason + "\n", encoding="utf-8")
+    return StepResult(
+        name=name,
+        command=reason,
+        cwd=str(cwd),
+        log_file=str(log_file.relative_to(REPO_ROOT)),
+        started_at=started_at,
+        ended_at=started_at,
+        duration_seconds=0.0,
+        exit_code=0,
+        status="skipped",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run reproducible repository validation checks.")
     parser.add_argument(
@@ -86,210 +103,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Artifact directory relative to repo root or absolute path.",
     )
     return parser
-
-
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
-
-    artifact_dir = Path(args.artifact_dir)
-    if not artifact_dir.is_absolute():
-        artifact_dir = REPO_ROOT / artifact_dir
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    started_at = _timestamp()
-    started = datetime.now().astimezone()
-    steps: list[StepResult] = []
-    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-
-    def run(name: str, command: list[str], cwd: Path, log_path: Path) -> int:
-        result = run_step(name, command, cwd, log_path)
-        steps.append(result)
-        print(f"[{result.status.upper()}] {name} (exit={result.exit_code})")
-        return result.exit_code
-
-    # Backend
-    if args.mode in {"all", "backend"}:
-        backend_artifacts = artifact_dir / "backend"
-        backend_artifacts.mkdir(parents=True, exist_ok=True)
-        if not args.skip_install:
-            exit_code = run(
-                "backend-install",
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "-r",
-                    "requirements.txt",
-                    "-r",
-                    "requirements-dev.txt",
-                ],
-                REPO_ROOT / "prometheus-api",
-                backend_artifacts / "backend-install.log",
-            )
-            if exit_code != 0:
-                return write_summary_and_exit(
-                    artifact_dir=artifact_dir,
-                    mode=args.mode,
-                    started_at=started_at,
-                    started=started,
-                    steps=steps,
-                    exit_code=exit_code,
-                )
-
-        exit_code = run(
-            "backend-test",
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-q",
-                "tests",
-                f"--junitxml={str((backend_artifacts / 'junit.xml').resolve())}",
-            ],
-            REPO_ROOT / "prometheus-api",
-            backend_artifacts / "backend-test.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-    # Frontend
-    if args.mode in {"all", "frontend"}:
-        frontend_artifacts = artifact_dir / "frontend"
-        frontend_artifacts.mkdir(parents=True, exist_ok=True)
-        if not args.skip_install:
-            exit_code = run(
-                "frontend-install",
-                [npm_cmd, "ci"],
-                REPO_ROOT / "prometheus-app",
-                frontend_artifacts / "frontend-install.log",
-            )
-            if exit_code != 0:
-                return write_summary_and_exit(
-                    artifact_dir=artifact_dir,
-                    mode=args.mode,
-                    started_at=started_at,
-                    started=started,
-                    steps=steps,
-                    exit_code=exit_code,
-                )
-
-        exit_code = run(
-            "frontend-typecheck",
-            [npm_cmd, "run", "typecheck"],
-            REPO_ROOT / "prometheus-app",
-            frontend_artifacts / "frontend-typecheck.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-        exit_code = run(
-            "frontend-test",
-            [npm_cmd, "run", "test:ci"],
-            REPO_ROOT / "prometheus-app",
-            frontend_artifacts / "frontend-test.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-    # Docs / drift / optional smoke
-    if args.mode in {"all", "docs"}:
-        docs_artifacts = artifact_dir / "docs"
-        docs_artifacts.mkdir(parents=True, exist_ok=True)
-
-        exit_code = run(
-            "docs-check-config-drift",
-            [
-                sys.executable,
-                "scripts/check_config_drift.py",
-                "--output",
-                str((docs_artifacts / "config-drift.json").resolve()),
-            ],
-            REPO_ROOT,
-            docs_artifacts / "check-config-drift.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-        exit_code = run(
-            "docs-validate-readme-commands",
-            [
-                sys.executable,
-                "scripts/validate_readme_commands.py",
-                "--output",
-                str((docs_artifacts / "readme-command-check.json").resolve()),
-            ],
-            REPO_ROOT,
-            docs_artifacts / "validate-readme-commands.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-        exit_code = run(
-            "docs-optional-smoke",
-            [
-                sys.executable,
-                "scripts/optional_integration_smoke.py",
-                "--output",
-                str((docs_artifacts / "optional-smoke.json").resolve()),
-            ],
-            REPO_ROOT,
-            docs_artifacts / "optional-smoke.log",
-        )
-        if exit_code != 0:
-            return write_summary_and_exit(
-                artifact_dir=artifact_dir,
-                mode=args.mode,
-                started_at=started_at,
-                started=started,
-                steps=steps,
-                exit_code=exit_code,
-            )
-
-    return write_summary_and_exit(
-        artifact_dir=artifact_dir,
-        mode=args.mode,
-        started_at=started_at,
-        started=started,
-        steps=steps,
-        exit_code=0,
-    )
 
 
 def write_summary_and_exit(
@@ -316,6 +129,196 @@ def write_summary_and_exit(
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"Validation summary: {summary_path}")
     return exit_code
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    artifact_dir = Path(args.artifact_dir)
+    if not artifact_dir.is_absolute():
+        artifact_dir = REPO_ROOT / artifact_dir
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    started_at = _timestamp()
+    started = datetime.now().astimezone()
+    steps: list[StepResult] = []
+    overall_exit_code = 0
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+
+    def run(name: str, command: list[str], cwd: Path, log_path: Path) -> StepResult:
+        result = run_step(name, command, cwd, log_path)
+        steps.append(result)
+        print(f"[{result.status.upper()}] {name} (exit={result.exit_code})")
+        return result
+
+    def mark_failure_if_needed(result: StepResult) -> None:
+        nonlocal overall_exit_code
+        if result.exit_code != 0:
+            overall_exit_code = 1
+
+    def skip(name: str, cwd: Path, log_path: Path, reason: str) -> None:
+        result = skipped_step(name, cwd, log_path, reason)
+        steps.append(result)
+        print(f"[SKIPPED] {name}")
+
+    if args.mode in {"all", "backend"}:
+        backend_artifacts = artifact_dir / "backend"
+        backend_artifacts.mkdir(parents=True, exist_ok=True)
+        backend_ready = True
+
+        if not args.skip_install:
+            result = run(
+                "backend-install",
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    "requirements.txt",
+                    "-r",
+                    "requirements-dev.txt",
+                ],
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-install.log",
+            )
+            mark_failure_if_needed(result)
+            backend_ready = result.exit_code == 0
+
+        if backend_ready:
+            result = run(
+                "backend-lint",
+                [sys.executable, "-m", "ruff", "check", "app", "tests"],
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-lint.log",
+            )
+            mark_failure_if_needed(result)
+
+            result = run(
+                "backend-test",
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "tests",
+                    "--cov=app",
+                    f"--cov-report=xml:{str((backend_artifacts / 'coverage.xml').resolve())}",
+                    f"--junitxml={str((backend_artifacts / 'junit.xml').resolve())}",
+                ],
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-test.log",
+            )
+            mark_failure_if_needed(result)
+        else:
+            skip(
+                "backend-lint",
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-lint.log",
+                "Skipped because backend-install failed.",
+            )
+            skip(
+                "backend-test",
+                REPO_ROOT / "prometheus-api",
+                backend_artifacts / "backend-test.log",
+                "Skipped because backend-install failed.",
+            )
+
+    if args.mode in {"all", "frontend"}:
+        frontend_artifacts = artifact_dir / "frontend"
+        frontend_artifacts.mkdir(parents=True, exist_ok=True)
+        frontend_ready = True
+
+        if not args.skip_install:
+            result = run(
+                "frontend-install",
+                [npm_cmd, "ci"],
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-install.log",
+            )
+            mark_failure_if_needed(result)
+            frontend_ready = result.exit_code == 0
+
+        if frontend_ready:
+            result = run(
+                "frontend-typecheck",
+                [npm_cmd, "run", "typecheck"],
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-typecheck.log",
+            )
+            mark_failure_if_needed(result)
+
+            result = run(
+                "frontend-test",
+                [npm_cmd, "run", "test:ci"],
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-test.log",
+            )
+            mark_failure_if_needed(result)
+        else:
+            skip(
+                "frontend-typecheck",
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-typecheck.log",
+                "Skipped because frontend-install failed.",
+            )
+            skip(
+                "frontend-test",
+                REPO_ROOT / "prometheus-app",
+                frontend_artifacts / "frontend-test.log",
+                "Skipped because frontend-install failed.",
+            )
+
+    if args.mode in {"all", "docs"}:
+        docs_artifacts = artifact_dir / "docs"
+        docs_artifacts.mkdir(parents=True, exist_ok=True)
+
+        docs_steps = [
+            (
+                "docs-check-config-drift",
+                [
+                    sys.executable,
+                    "scripts/check_config_drift.py",
+                    "--output",
+                    str((docs_artifacts / "config-drift.json").resolve()),
+                ],
+                docs_artifacts / "check-config-drift.log",
+            ),
+            (
+                "docs-validate-readme-commands",
+                [
+                    sys.executable,
+                    "scripts/validate_readme_commands.py",
+                    "--output",
+                    str((docs_artifacts / "readme-command-check.json").resolve()),
+                ],
+                docs_artifacts / "validate-readme-commands.log",
+            ),
+            (
+                "docs-optional-smoke",
+                [
+                    sys.executable,
+                    "scripts/optional_integration_smoke.py",
+                    "--output",
+                    str((docs_artifacts / "optional-smoke.json").resolve()),
+                ],
+                docs_artifacts / "optional-smoke.log",
+            ),
+        ]
+
+        for name, command, log_path in docs_steps:
+            result = run(name, command, REPO_ROOT, log_path)
+            mark_failure_if_needed(result)
+
+    return write_summary_and_exit(
+        artifact_dir=artifact_dir,
+        mode=args.mode,
+        started_at=started_at,
+        started=started,
+        steps=steps,
+        exit_code=overall_exit_code,
+    )
 
 
 if __name__ == "__main__":

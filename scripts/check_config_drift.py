@@ -28,10 +28,16 @@ def run_checks() -> list[Check]:
     config_path = REPO_ROOT / "prometheus-api" / "app" / "core" / "config.py"
     env_path = REPO_ROOT / "prometheus-api" / ".env.example"
     readme_path = REPO_ROOT / "README.md"
+    app_config_path = REPO_ROOT / "prometheus-app" / "app.config.js"
+    app_json_path = REPO_ROOT / "prometheus-app" / "app.json"
+    runtime_config_path = REPO_ROOT / "prometheus-app" / "services" / "config" / "runtime.ts"
 
     runtime_gemini = _extract_regex_value(config_path, r'gemini_model:\s*str\s*=\s*"([^"]+)"')
     env_gemini = _extract_regex_value(env_path, r"^GEMINI_MODEL=(.+)$")
     readme = readme_path.read_text(encoding="utf-8")
+    app_config = app_config_path.read_text(encoding="utf-8")
+    app_json = app_json_path.read_text(encoding="utf-8")
+    runtime_config = runtime_config_path.read_text(encoding="utf-8")
 
     runtime_legacy = _extract_regex_value(config_path, r"allow_legacy_app_token:\s*bool\s*=\s*(True|False)")
     env_legacy = _extract_regex_value(env_path, r"^ALLOW_LEGACY_APP_TOKEN=(.+)$")
@@ -63,6 +69,20 @@ def run_checks() -> list[Check]:
             name="readme_declares_legacy_opt_in",
             passed="ALLOW_LEGACY_APP_TOKEN=false" in readme,
             detail="README must include the explicit legacy compatibility opt-in switch",
+        )
+    )
+    checks.append(
+        Check(
+            name="expo_extra_does_not_embed_legacy_token",
+            passed="legacyAppToken" not in app_config and "legacyAppToken" not in app_json,
+            detail="Expo config must not embed legacy app token into public extra config",
+        )
+    )
+    checks.append(
+        Check(
+            name="runtime_config_does_not_read_legacy_token_from_expo_extra",
+            passed="extra.legacyAppToken" not in runtime_config,
+            detail="Runtime config must read deprecated legacy token from env opt-in only",
         )
     )
     return checks

@@ -13,12 +13,18 @@ from .database import get_db
 from .legacy_auth_observability import record_legacy_auth_event
 
 
+def _resolve_optional_db(value: object) -> Client | None:
+    return value if hasattr(value, "table") else None
+
+
 def require_app_token(
     x_app_id: Annotated[str | None, Header(alias="X-App-ID")] = None,
     x_app_token: Annotated[str | None, Header(alias="X-App-Token")] = None,
+    db: Client | None = Depends(get_db),
 ) -> None:
     """Validate public app identity with optional legacy token compatibility."""
     settings = get_settings()
+    resolved_db = _resolve_optional_db(db)
 
     if x_app_id:
         app_id = x_app_id.strip().lower()
@@ -38,7 +44,7 @@ def require_app_token(
 
     if not settings.allow_legacy_app_token:
         if x_app_token:
-            record_legacy_auth_event(outcome="rejected", reason="compat_disabled")
+            record_legacy_auth_event(db=resolved_db, outcome="rejected", reason="compat_disabled")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="X-App-ID header is required",
@@ -56,20 +62,20 @@ def require_app_token(
         )
 
     if not settings.app_token:
-        record_legacy_auth_event(outcome="rejected", reason="server_unconfigured")
+        record_legacy_auth_event(db=resolved_db, outcome="rejected", reason="server_unconfigured")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server legacy APP_TOKEN is not configured",
         )
 
     if not secrets.compare_digest(x_app_token, settings.app_token):
-        record_legacy_auth_event(outcome="rejected", reason="invalid_token")
+        record_legacy_auth_event(db=resolved_db, outcome="rejected", reason="invalid_token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid app token",
         )
 
-    record_legacy_auth_event(outcome="accepted", reason="legacy_compat")
+    record_legacy_auth_event(db=resolved_db, outcome="accepted", reason="legacy_compat")
 
 
 def get_device_id(

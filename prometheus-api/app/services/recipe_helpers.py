@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 from datetime import date, datetime
@@ -5,6 +7,7 @@ from uuid import UUID, uuid4
 
 from supabase import Client
 
+from ..core.units import normalize_default_unit
 from ..schemas.schemas import Recipe, RecipeIngredient
 
 
@@ -38,7 +41,7 @@ def inventory_fingerprint(inventory_rows: list[dict]) -> str:
             {
                 "name": str(row.get("name", "")).strip().lower(),
                 "quantity": round(float(row.get("quantity", 0) or 0), 2),
-                "unit": str(row.get("unit", "unit")).strip().lower(),
+                "unit": normalize_default_unit(str(row.get("unit") or "")).lower(),
                 "expiry_date": str(row.get("expiry_date") or ""),
             }
         )
@@ -68,7 +71,7 @@ def map_generated_recipe(recipe_data: dict, inventory_items: list[dict]) -> Reci
             RecipeIngredient(
                 name=ingredient_name,
                 quantity=float(ingredient_data.get("quantity", 1)),
-                unit=str(ingredient_data.get("unit", "unit")),
+                unit=normalize_default_unit(str(ingredient_data.get("unit") or "")),
                 available=matched_inventory is not None,
                 expiry_days=matched_inventory.get("expiry_days") if matched_inventory else None,
             )

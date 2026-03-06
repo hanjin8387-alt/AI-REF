@@ -11,7 +11,8 @@ const KEYS = {
   FAVORITES: 'prometheus_offline_favorites',
   SHOPPING: 'prometheus_offline_shopping',
   PENDING_MUTATIONS: 'prometheus_pending_mutations',
-  LAST_SYNC: 'prometheus_last_sync',
+  LAST_CONTACT: 'prometheus_last_contact',
+  DATASET_SYNC_CURSOR: 'prometheus_dataset_sync_cursor',
 } as const;
 
 const MAX_PENDING_MUTATIONS = 200;
@@ -25,6 +26,7 @@ export type PendingMutation = {
   attempt_count: number;
   next_retry_at: number;
   idempotency_key: string;
+  fingerprint?: string;
 };
 
 type PendingMutationInput = Omit<PendingMutation, 'id' | 'created_at' | 'attempt_count' | 'next_retry_at'> & {
@@ -189,8 +191,14 @@ class OfflineCache {
     try {
       const queue = await this.getPendingMutations();
       const idempotencyKey = (action.idempotency_key || '').trim();
+      const fingerprint = typeof action.fingerprint === 'string' ? (action.fingerprint || '').trim() : '';
 
-      const dedupedQueue = idempotencyKey ? queue.filter(item => item.idempotency_key !== idempotencyKey) : [...queue];
+      const dedupedQueue = queue.filter(item => {
+        if (fingerprint && item.fingerprint) {
+          return item.fingerprint !== fingerprint;
+        }
+        return !idempotencyKey || item.idempotency_key !== idempotencyKey;
+      });
       dedupedQueue.push({
         id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         created_at: Date.now(),
@@ -225,6 +233,7 @@ class OfflineCache {
           attempt_count: Number(item.attempt_count) || 0,
           next_retry_at: Number(item.next_retry_at) || Date.now(),
           idempotency_key: String(item.idempotency_key || ''),
+          fingerprint: typeof item.fingerprint === 'string' ? item.fingerprint : undefined,
         }))
         .filter(item => Boolean(item.endpoint) && Boolean(item.idempotency_key));
     } catch {
@@ -267,23 +276,50 @@ class OfflineCache {
     }
   }
 
-  async setLastSync(timestamp = Date.now()): Promise<void> {
+  async setLastContact(timestamp = Date.now()): Promise<void> {
     try {
-      await AsyncStorage.setItem(KEYS.LAST_SYNC, String(timestamp));
+      await AsyncStorage.setItem(KEYS.LAST_CONTACT, String(timestamp));
     } catch {
       // best effort
     }
   }
 
-  async getLastSync(): Promise<number | null> {
+  async getLastContact(): Promise<number | null> {
     try {
-      const raw = await AsyncStorage.getItem(KEYS.LAST_SYNC);
+      const raw = await AsyncStorage.getItem(KEYS.LAST_CONTACT);
       if (!raw) return null;
       const value = Number(raw);
       return Number.isFinite(value) ? value : null;
     } catch {
       return null;
     }
+  }
+
+  async setDatasetSyncCursor(timestamp = Date.now()): Promise<void> {
+    try {
+      await AsyncStorage.setItem(KEYS.DATASET_SYNC_CURSOR, String(timestamp));
+    } catch {
+      // best effort
+    }
+  }
+
+  async getDatasetSyncCursor(): Promise<number | null> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.DATASET_SYNC_CURSOR);
+      if (!raw) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async setLastSync(timestamp = Date.now()): Promise<void> {
+    await this.setDatasetSyncCursor(timestamp);
+  }
+
+  async getLastSync(): Promise<number | null> {
+    return this.getDatasetSyncCursor();
   }
 }
 

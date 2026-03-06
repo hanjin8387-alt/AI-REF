@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 # PROMETHEUS API Routes
 from .auth import router as auth_router
 from .scans import router as scans_router

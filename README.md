@@ -19,7 +19,9 @@ bash scripts/validate-all.sh
 - 검증 결과는 `artifacts/` 하위에 생성됩니다.
 - 기본 경로:
   - `artifacts/backend/junit.xml`
+  - `artifacts/backend/coverage.xml`
   - `artifacts/frontend/junit.xml`
+  - `artifacts/frontend/coverage/`
   - `artifacts/validation-summary.json`
   - `artifacts/docs/config-drift.json`
   - `artifacts/docs/readme-command-check.json`
@@ -71,7 +73,15 @@ cd prometheus-api
 bash scripts/apply-migrations.sh
 ```
 
-또는 `migrations/0001_initial.sql` -> `migrations/0002_auth_idempotency.sql` 순서로 직접 적용합니다.
+또는 `migrations/0001_initial.sql` -> `migrations/0002_auth_idempotency.sql` -> `migrations/0003_runtime_canonicalization_and_legacy_metrics.sql` 순서로 직접 적용합니다.
+
+기존 `name_normalized` 데이터와 런타임 canonicalizer 차이를 정리하려면 dry-run 후 apply 순서로 reconciliation 스크립트를 실행합니다.
+
+```bash
+cd prometheus-api
+python scripts/reconcile_inventory_name_normalization.py --output ../artifacts/docs/name-normalization-plan.json
+python scripts/reconcile_inventory_name_normalization.py --apply --output ../artifacts/docs/name-normalization-apply.json
+```
 
 ### 4) 서버 실행
 
@@ -101,7 +111,7 @@ npm ci
 - `EXPO_PUBLIC_API_URL` (기본: `http://localhost:8000`)
 - `EXPO_PUBLIC_APP_ID` (기본: `prometheus-app`)
 - `EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN` (기본: `false`)
-- `EXPO_PUBLIC_APP_TOKEN` (`EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN=true` 일 때만 사용)
+- `EXPO_PUBLIC_APP_TOKEN` (deprecated compatibility path, `EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN=true` 일 때만 사용)
 
 ### 3) 개발 서버
 
@@ -132,7 +142,7 @@ npm run test
 프론트엔드에서도 아래를 명시해야만 레거시 토큰을 전송합니다.
 
 - `EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN=true`
-- `EXPO_PUBLIC_APP_TOKEN=<legacy-token>`
+- `EXPO_PUBLIC_APP_TOKEN=<legacy-token>` (deprecated, new Expo config builds do not embed this into `expo.extra`)
 
 서버는 레거시 토큰 경로 사용 시 구조화된 경고 로그와 카운터를 기록합니다.
 운영 관찰이 필요하면 관리자 토큰으로 `GET /admin/legacy-auth-metrics` 를 조회할 수 있습니다.
@@ -147,8 +157,8 @@ npm run test
 
 표준 CI는 OpenAI 비밀 키 없이 동작합니다.
 
-- `Backend Test`: 설치 + `pytest` + JUnit 업로드
-- `Frontend Typecheck + Test`: `npm ci`, `typecheck`, `vitest` JUnit 업로드
+- `Backend Validation`: install + `ruff` + `pytest --cov` + artifacts upload
+- `Frontend Validation`: `npm ci`, `typecheck`, `vitest --coverage` + artifacts upload
 - `Docs Drift + Validation Summary`: drift/readme/smoke(옵션) 검증 + 요약 업로드
 
 업로드 아티팩트 이름:

@@ -4,8 +4,6 @@ import { isLegacyAppTokenEnabled as resolveLegacyEnabled, resolveLegacyAppToken 
 type ExtraConfig = {
   apiUrl?: string;
   appId?: string;
-  enableLegacyAppToken?: boolean | string;
-  legacyAppToken?: string;
 };
 
 const DEFAULT_API_URL = 'http://localhost:8000';
@@ -29,19 +27,14 @@ export function getAppId(): string {
 }
 
 export function isLegacyAppTokenEnabled(): boolean {
-  const extra = readExtraConfig();
   return resolveLegacyEnabled({
     envLegacyEnabled: process.env.EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN,
-    configLegacyEnabled: extra.enableLegacyAppToken,
   });
 }
 
 export function getLegacyAppToken(): string {
-  const extra = readExtraConfig();
   return resolveLegacyAppToken({
     envLegacyEnabled: process.env.EXPO_PUBLIC_ENABLE_LEGACY_APP_TOKEN,
-    configLegacyEnabled: extra.enableLegacyAppToken,
     envLegacyToken: process.env.EXPO_PUBLIC_APP_TOKEN,
-    configLegacyToken: extra.legacyAppToken,
   });
 }

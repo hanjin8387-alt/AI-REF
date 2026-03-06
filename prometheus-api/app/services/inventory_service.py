@@ -5,7 +5,8 @@ from typing import Any
 
 from supabase import Client
 
-from ..core.normalization import normalize_item_name
+from ..core.normalization import NAME_NORMALIZATION_VERSION, normalize_item_name
+from ..core.units import normalize_default_unit
 from ..schemas.schemas import InventoryItem
 from .storage_utils import normalize_storage_category
 
@@ -50,8 +51,9 @@ def bulk_upsert_inventory(
             {
                 "name": name,
                 "name_normalized": key,
+                "name_normalization_version": NAME_NORMALIZATION_VERSION,
                 "quantity": 0.0,
-                "unit": (str(raw_item.get("unit") or "unit")).strip() or "unit",
+                "unit": normalize_default_unit(raw_item.get("unit")),
                 "expiry_date": None,
                 "category": normalize_storage_category(raw_item.get("category")),
             },
@@ -59,7 +61,7 @@ def bulk_upsert_inventory(
         payload["quantity"] += max(float(raw_item.get("quantity", 0)), 0.0)
         unit = str(raw_item.get("unit") or "").strip()
         if unit:
-            payload["unit"] = unit
+            payload["unit"] = normalize_default_unit(unit)
         expiry = raw_item.get("expiry_date")
         if expiry:
             current = payload["expiry_date"]
@@ -118,10 +120,10 @@ def bulk_upsert_inventory(
                 "device_id": device_id,
                 "name": row_name,
                 "name_normalized": row_name_key,
+                "name_normalization_version": NAME_NORMALIZATION_VERSION,
                 "quantity": new_quantity,
-                "unit": payload["unit"]
-                or (existing.get("unit") if existing else "unit")
-                or "unit",
+                "unit": normalize_default_unit(payload["unit"])
+                or normalize_default_unit(existing.get("unit") if existing else None),
                 "expiry_date": _to_iso_date(payload["expiry_date"])
                 or (existing.get("expiry_date") if existing else None),
                 "category": normalize_storage_category(payload.get("category"))

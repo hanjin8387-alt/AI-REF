@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 # PROMETHEUS API Services
 from .gemini_service import GeminiService, get_gemini_service
 from .notifications import create_notification

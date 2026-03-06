@@ -10,7 +10,7 @@ RECIPE_SELECT_COLUMNS = (
 )
 
 INVENTORY_SELECT_COLUMNS = (
-    "id,device_id,name,name_normalized,quantity,unit,category,expiry_date,image_url,created_at,updated_at"
+    "id,device_id,name,name_normalized,name_normalization_version,quantity,unit,category,expiry_date,image_url,created_at,updated_at"
 )
 
 FAVORITE_RECIPE_SELECT_COLUMNS = "id,device_id,recipe_id,title,recipe_data,created_at"

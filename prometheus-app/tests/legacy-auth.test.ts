@@ -20,20 +20,19 @@ describe('legacy app token compatibility', () => {
     ).toBe('legacy-token');
   });
 
-  it('accepts config fallback when explicitly enabled by config', () => {
+  it('does not accept token values without explicit env opt-in', () => {
     expect(
       resolveLegacyAppToken({
-        configLegacyEnabled: true,
-        configLegacyToken: 'config-legacy-token',
+        envLegacyEnabled: 'false',
+        envLegacyToken: 'legacy-token',
       })
-    ).toBe('config-legacy-token');
+    ).toBe('');
   });
 
   it('treats invalid boolean values as disabled', () => {
     expect(
       isLegacyAppTokenEnabled({
         envLegacyEnabled: 'sometimes',
-        configLegacyEnabled: 'enabled',
       })
     ).toBe(false);
   });

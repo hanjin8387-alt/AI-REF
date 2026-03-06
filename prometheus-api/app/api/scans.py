@@ -15,6 +15,7 @@ from ..core.db_columns import SCAN_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.idempotency import load_idempotent_response, save_idempotent_response
 from ..core.security import require_app_token, require_device_auth
+from ..core.units import normalize_default_unit
 from ..schemas.schemas import (
     BarcodeProductInfo,
     BarcodeResponse,
@@ -40,12 +41,7 @@ router = APIRouter(
 )
 
 def _normalize_unit(value: str | None) -> str:
-    unit = (value or "").strip()
-    if not unit:
-        return "개"
-    if unit.lower() == "unit":
-        return "개"
-    return unit
+    return normalize_default_unit(value)
 
 
 def _enrich_scan_items_with_storage(items: list[FoodItem]) -> list[FoodItem]:

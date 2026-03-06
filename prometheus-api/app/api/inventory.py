@@ -8,7 +8,8 @@ from supabase import Client
 from ..core.db_columns import INVENTORY_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.idempotency import load_idempotent_response, save_idempotent_response
-from ..core.normalization import normalize_item_name
+from ..core.normalization import NAME_NORMALIZATION_VERSION, normalize_item_name
+from ..core.units import normalize_default_unit
 from ..core.security import require_app_token, require_device_auth
 from ..schemas.schemas import (
     BulkInventoryRequest,
@@ -184,13 +185,13 @@ async def update_inventory_item(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
         updates["name"] = name
         updates["name_normalized"] = normalize_item_name(name)
+        updates["name_normalization_version"] = NAME_NORMALIZATION_VERSION
     if request.quantity is not None:
         if request.quantity < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than or equal to 0.")
         updates["quantity"] = float(request.quantity)
     if request.unit is not None:
-        unit = request.unit.strip()
-        updates["unit"] = unit or "개"
+        updates["unit"] = normalize_default_unit(request.unit)
     if request.expiry_date is not None:
         updates["expiry_date"] = request.expiry_date.date().isoformat()
     if request.category is not None:
@@ -315,9 +316,10 @@ async def restore_inventory_item(
             .update(
                 {
                     "quantity": float(row.get("quantity", 0)) + max(float(request.quantity), 0.0),
-                    "unit": request.unit.strip() or row.get("unit") or "개",
+                    "unit": normalize_default_unit(request.unit or row.get("unit")),
                     "expiry_date": expiry_date or row.get("expiry_date"),
                     "name_normalized": normalized_name,
+                    "name_normalization_version": NAME_NORMALIZATION_VERSION,
                     "category": normalized_category if request.category is not None else row.get("category"),
                 }
             )
@@ -336,8 +338,9 @@ async def restore_inventory_item(
                     "device_id": device_id,
                     "name": name,
                     "name_normalized": normalized_name,
+                    "name_normalization_version": NAME_NORMALIZATION_VERSION,
                     "quantity": max(float(request.quantity), 0.0),
-                    "unit": request.unit.strip() or "개",
+                    "unit": normalize_default_unit(request.unit),
                     "expiry_date": expiry_date,
                     "category": normalized_category,
                 }

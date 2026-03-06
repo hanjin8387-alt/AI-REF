@@ -2,21 +2,18 @@ from __future__ import annotations
 
 from supabase import Client
 
+from ..core.normalization import normalize_item_name
+from ..core.units import normalize_default_unit
 from ..schemas.schemas import InventoryItem, LowStockSuggestionItem, ShoppingItemInput, ShoppingItemSource, ShoppingItemStatus
 from ..services.inventory_service import bulk_upsert_inventory
 
 
 def normalize_name(value: str) -> str:
-    return value.strip().lower()
+    return normalize_item_name(value)
 
 
 def normalize_unit(value: str | None) -> str:
-    unit = (value or "").strip()
-    if not unit:
-        return "개"
-    if unit.lower() == "unit":
-        return "개"
-    return unit
+    return normalize_default_unit(value)
 
 
 def parse_quantity(value: object) -> float:
@@ -37,6 +34,9 @@ def aggregate_shopping_items(items: list[ShoppingItemInput]) -> dict[str, dict]:
             continue
 
         key = normalize_name(name)
+        if not key:
+            continue
+
         payload = aggregated.setdefault(
             key,
             {
@@ -74,7 +74,7 @@ def upsert_pending_shopping_items(
         .data
         or []
     )
-    existing_by_name = {str(row.get("name", "")).strip().lower(): row for row in existing_rows}
+    existing_by_name = {normalize_name(str(row.get("name", ""))): row for row in existing_rows}
 
     added_count = 0
     updated_count = 0
@@ -160,13 +160,13 @@ def build_low_stock_suggestions(
     lookback_days: int,
     threshold_days: int,
 ) -> list[LowStockSuggestionItem]:
-    pending_names = {str(row.get("name", "")).strip().lower() for row in pending_shopping_rows}
+    pending_names = {normalize_name(str(row.get("name", ""))) for row in pending_shopping_rows}
 
     daily_usage_by_name: dict[str, float] = {}
     for row in consumption_rows:
         if str(row.get("action", "")).lower() != "cook":
             continue
-        item_name = str(row.get("item_name", "")).strip().lower()
+        item_name = normalize_name(str(row.get("item_name", "")))
         if not item_name:
             continue
         qty = abs(parse_quantity(row.get("quantity_change")))
@@ -177,7 +177,7 @@ def build_low_stock_suggestions(
     suggestions: list[LowStockSuggestionItem] = []
     for row in inventory_rows:
         item_name_raw = str(row.get("name", "")).strip()
-        item_name = item_name_raw.lower()
+        item_name = normalize_name(item_name_raw)
         if not item_name or item_name in pending_names:
             continue
 

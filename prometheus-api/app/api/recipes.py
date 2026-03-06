@@ -17,6 +17,7 @@ from ..core.db_columns import (
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..core.security import require_app_token, require_device_auth
+from ..core.units import normalize_default_unit
 from ..schemas.schemas import (
     CookCompleteRequest,
     CookCompleteResponse,
@@ -195,7 +196,7 @@ async def _build_recommendation_response(
             {
                 "name": item["name"],
                 "quantity": float(item.get("quantity", 1)),
-                "unit": item.get("unit", "unit"),
+                "unit": normalize_default_unit(item.get("unit")),
                 "expiry_days": parse_expiry_days(item.get("expiry_date"), today),
             }
         )

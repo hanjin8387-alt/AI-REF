@@ -54,8 +54,9 @@ CREATE TABLE IF NOT EXISTS inventory (
     device_id VARCHAR(255),
     name VARCHAR(255) NOT NULL,
     name_normalized TEXT,
+    name_normalization_version INTEGER NOT NULL DEFAULT 1,
     quantity DECIMAL(10, 2) DEFAULT 1,
-    unit VARCHAR(50) DEFAULT 'unit',
+    unit VARCHAR(50) DEFAULT U&'\AC1C',
     category VARCHAR(100),
     expiry_date DATE,
     image_url TEXT,
@@ -87,8 +88,11 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS token_revoked_at TIMESTAMPTZ;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
 ALTER TABLE inventory ADD COLUMN IF NOT EXISTS name_normalized TEXT;
+ALTER TABLE inventory ADD COLUMN IF NOT EXISTS name_normalization_version INTEGER NOT NULL DEFAULT 1;
 UPDATE inventory SET name_normalized = lower(trim(name)) WHERE name_normalized IS NULL;
 ALTER TABLE inventory ALTER COLUMN name_normalized SET NOT NULL;
+ALTER TABLE inventory ALTER COLUMN unit SET DEFAULT U&'\AC1C';
+UPDATE inventory SET unit = U&'\AC1C' WHERE unit IS NULL OR btrim(unit) = '' OR lower(unit) = 'unit';
 
 -- Favorites (supports generated non-UUID recipe IDs)
 CREATE TABLE IF NOT EXISTS favorite_recipes (
@@ -131,7 +135,7 @@ CREATE TABLE IF NOT EXISTS shopping_items (
     device_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     quantity DECIMAL(10, 2) DEFAULT 1,
-    unit VARCHAR(50) DEFAULT 'unit',
+    unit VARCHAR(50) DEFAULT U&'\AC1C',
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     source VARCHAR(20) NOT NULL DEFAULT 'manual',
     recipe_id VARCHAR(255),
@@ -143,6 +147,9 @@ CREATE TABLE IF NOT EXISTS shopping_items (
     CONSTRAINT shopping_items_status_check CHECK (status IN ('pending', 'purchased', 'canceled')),
     CONSTRAINT shopping_items_source_check CHECK (source IN ('manual', 'recipe', 'low_stock'))
 );
+
+ALTER TABLE shopping_items ALTER COLUMN unit SET DEFAULT U&'\AC1C';
+UPDATE shopping_items SET unit = U&'\AC1C' WHERE unit IS NULL OR btrim(unit) = '' OR lower(unit) = 'unit';
 
 -- Inventory change logs (for statistics)
 CREATE TABLE IF NOT EXISTS inventory_logs (
@@ -198,6 +205,17 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS legacy_auth_event_counters (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    auth_mode VARCHAR(64) NOT NULL DEFAULT 'legacy_app_token',
+    outcome VARCHAR(32) NOT NULL,
+    reason VARCHAR(64) NOT NULL,
+    event_count BIGINT NOT NULL DEFAULT 0,
+    first_observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(auth_mode, outcome, reason)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_device_created ON inventory_logs(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_device_action ON inventory_logs(device_id, action);
@@ -226,6 +244,47 @@ CREATE INDEX IF NOT EXISTS idx_recipe_recommendation_jobs_device_updated
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_device_created ON idempotency_keys(device_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotency_keys_unique
     ON idempotency_keys(device_id, method, path, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_legacy_auth_event_counters_last_seen
+    ON legacy_auth_event_counters(last_observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_legacy_auth_event_counters_outcome_reason
+    ON legacy_auth_event_counters(auth_mode, outcome, reason);
+
+CREATE OR REPLACE FUNCTION increment_legacy_auth_event_counter(
+    p_auth_mode VARCHAR,
+    p_outcome VARCHAR,
+    p_reason VARCHAR
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO legacy_auth_event_counters (
+        auth_mode,
+        outcome,
+        reason,
+        event_count,
+        first_observed_at,
+        last_observed_at
+    )
+    VALUES (
+        COALESCE(NULLIF(p_auth_mode, ''), 'legacy_app_token'),
+        p_outcome,
+        p_reason,
+        1,
+        NOW(),
+        NOW()
+    )
+    ON CONFLICT (auth_mode, outcome, reason)
+    DO UPDATE SET
+        event_count = legacy_auth_event_counters.event_count + 1,
+        last_observed_at = NOW();
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION increment_legacy_auth_event_counter(VARCHAR, VARCHAR, VARCHAR)
+TO service_role;
 
 -- Trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -279,6 +338,7 @@ ALTER TABLE inventory_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE price_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recipe_recommendation_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idempotency_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE legacy_auth_event_counters ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Service role full access" ON devices;
 DROP POLICY IF EXISTS "Service role full access" ON scans;
@@ -292,6 +352,7 @@ DROP POLICY IF EXISTS "Service role full access" ON inventory_logs;
 DROP POLICY IF EXISTS "Service role full access" ON price_history;
 DROP POLICY IF EXISTS "Service role full access" ON recipe_recommendation_jobs;
 DROP POLICY IF EXISTS "Service role full access" ON idempotency_keys;
+DROP POLICY IF EXISTS "Service role full access" ON legacy_auth_event_counters;
 
 CREATE POLICY "Service role full access" ON devices
     FOR ALL TO service_role USING (true) WITH CHECK (true);
@@ -317,8 +378,10 @@ CREATE POLICY "Service role full access" ON recipe_recommendation_jobs
     FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON idempotency_keys
     FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access" ON legacy_auth_event_counters
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-REVOKE ALL ON devices, scans, inventory, recipes, favorite_recipes, cooking_history, notifications, shopping_items, inventory_logs, price_history, recipe_recommendation_jobs, idempotency_keys
+REVOKE ALL ON devices, scans, inventory, recipes, favorite_recipes, cooking_history, notifications, shopping_items, inventory_logs, price_history, recipe_recommendation_jobs, idempotency_keys, legacy_auth_event_counters
 FROM anon, authenticated;
 
 -- Transactional cook completion: inventory updates/deletes + history insert

@@ -23,6 +23,7 @@ from .api.shopping import router as shopping_router
 from .api.stats import router as stats_router
 from .core.config import get_settings
 from .core.database import get_db
+from .core.startup_validation import validate_startup_settings
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
@@ -33,27 +34,7 @@ DEFAULT_CACHE_CONTROL = "private, max-age=15, stale-while-revalidate=30"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    missing = []
-    if settings.allow_legacy_app_token and not settings.app_token:
-        missing.append("APP_TOKEN")
-    if settings.is_production_like and not settings.admin_token:
-        missing.append("ADMIN_TOKEN")
-    if not settings.supabase_url:
-        missing.append("SUPABASE_URL")
-    if not settings.supabase_key:
-        missing.append("SUPABASE_KEY")
-    if not settings.gemini_api_key:
-        missing.append("GEMINI_API_KEY")
-    if not settings.parsed_app_ids:
-        missing.append("APP_IDS")
-    if missing:
-        raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
-    if not settings.parsed_cors_origins:
-        raise RuntimeError("CORS_ORIGINS must include at least one explicit origin")
-
-    # Prevent wildcard CORS in production-like environments.
-    if settings.is_production_like and settings.cors_origins.strip() == "*":
-        raise RuntimeError("CORS_ORIGINS must not be '*' in production-like environments")
+    validate_startup_settings(settings)
     logging.basicConfig(
         level=logging.DEBUG if settings.debug else logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",

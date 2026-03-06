@@ -1,8 +1,6 @@
 export type LegacyAuthResolutionInput = {
   envLegacyToken?: string;
   envLegacyEnabled?: string | boolean;
-  configLegacyToken?: string;
-  configLegacyEnabled?: string | boolean;
 };
 
 export function parseBoolean(value: unknown): boolean | null {
@@ -18,10 +16,6 @@ export function parseBoolean(value: unknown): boolean | null {
 export function isLegacyAppTokenEnabled(input: LegacyAuthResolutionInput): boolean {
   const envValue = parseBoolean(input.envLegacyEnabled);
   if (envValue !== null) return envValue;
-
-  const configValue = parseBoolean(input.configLegacyEnabled);
-  if (configValue !== null) return configValue;
-
   return false;
 }
 
@@ -29,5 +23,5 @@ export function resolveLegacyAppToken(input: LegacyAuthResolutionInput): string 
   if (!isLegacyAppTokenEnabled(input)) {
     return '';
   }
-  return (input.envLegacyToken || input.configLegacyToken || '').trim();
+  return (input.envLegacyToken || '').trim();
 }

@@ -10,7 +10,7 @@
     "export:web": "expo export -p web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../artifacts/frontend/junit.xml"
+    "test:ci": "vitest run --coverage.enabled true --coverage.provider=v8 --coverage.reportsDirectory=../artifacts/frontend/coverage --reporter=default --reporter=junit --outputFile=../artifacts/frontend/junit.xml"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -39,6 +39,7 @@
     "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
     "@types/react": "~19.1.0",
     "@types/node": "^24.10.1",
     "babel-plugin-transform-remove-console": "^6.9.4",

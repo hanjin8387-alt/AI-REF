@@ -10,6 +10,7 @@ from google.genai.errors import ClientError
 from pydantic import BaseModel, ValidationError
 
 from ..core.config import get_settings
+from ..core.units import DEFAULT_UNIT
 from ..schemas.schemas import FoodItem
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class ReceiptAnalysisPayload(BaseModel):
 class GeneratedRecipeIngredientPayload(BaseModel):
     name: str
     quantity: float = 1
-    unit: str = "unit"
+    unit: str = DEFAULT_UNIT
 
 
 class GeneratedRecipePayload(BaseModel):

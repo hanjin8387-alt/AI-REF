@@ -11,11 +11,8 @@ permissions:
 
 jobs:
   backend:
-    name: Backend Test
+    name: Backend Validation
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: prometheus-api
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,17 +26,11 @@ jobs:
             prometheus-api/requirements.txt
             prometheus-api/requirements-dev.txt
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Run backend tests
+      - name: Run backend validation
         run: |
           set -o pipefail
-          mkdir -p "$GITHUB_WORKSPACE/artifacts/backend"
-          python -m pytest -q tests --junitxml="$GITHUB_WORKSPACE/artifacts/backend/junit.xml" \
-            | tee "$GITHUB_WORKSPACE/artifacts/backend/backend-test.log"
+          bash scripts/validate-all.sh --mode backend --artifact-dir artifacts \
+            | tee artifacts/backend-validation.log
 
       - name: Upload backend artifacts
         if: always()
@@ -50,11 +41,8 @@ jobs:
           if-no-files-found: error
 
   frontend:
-    name: Frontend Typecheck + Test
+    name: Frontend Validation
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: prometheus-app
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,19 +54,11 @@ jobs:
           cache: npm
           cache-dependency-path: prometheus-app/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run typecheck
+      - name: Run frontend validation
         run: |
           set -o pipefail
-          mkdir -p "$GITHUB_WORKSPACE/artifacts/frontend"
-          npm run typecheck | tee "$GITHUB_WORKSPACE/artifacts/frontend/frontend-typecheck.log"
-
-      - name: Run frontend tests
-        run: |
-          set -o pipefail
-          npm run test:ci | tee "$GITHUB_WORKSPACE/artifacts/frontend/frontend-test.log"
+          bash scripts/validate-all.sh --mode frontend --artifact-dir artifacts \
+            | tee artifacts/frontend-validation.log
 
       - name: Upload frontend artifacts
         if: always()
