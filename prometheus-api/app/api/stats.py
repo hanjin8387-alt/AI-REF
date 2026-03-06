@@ -9,11 +9,10 @@ from supabase import Client
 from ..core.db_columns import PRICE_HISTORY_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.security import require_app_token, require_device_auth
-from ..schemas.schemas import (
+from ..schemas.inventory import PriceHistoryItem, PriceHistoryResponse
+from ..schemas.stats import (
     CookingStats,
     InventoryStats,
-    PriceHistoryItem,
-    PriceHistoryResponse,
     ShoppingStats,
     StatsSummaryResponse,
 )

@@ -7,7 +7,7 @@ from supabase import Client
 
 from ..core.database import get_db
 from ..core.security import get_device_id
-from ..schemas.schemas import BootstrapResponse
+from ..schemas.auth import BootstrapResponse
 from ..services.auth.device_tokens import get_bootstrap_state
 
 logger = logging.getLogger(__name__)

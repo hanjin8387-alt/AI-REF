@@ -75,7 +75,7 @@ bash scripts/apply-migrations.sh
 
 또는 `migrations/0001_initial.sql` -> `migrations/0002_auth_idempotency.sql` -> `migrations/0003_runtime_canonicalization_and_legacy_metrics.sql` 순서로 직접 적용합니다.
 
-기존 `name_normalized` 데이터와 런타임 canonicalizer 차이를 정리하려면 dry-run 후 apply 순서로 reconciliation 스크립트를 실행합니다.
+기존 `name_normalized` 데이터와 런타임 canonicalizer 차이를 정리하려면 dry-run 후 apply 순서로 reconciliation 스크립트를 실행합니다. 이 스크립트는 `inventory` 중복 병합과 `shopping_items` canonical backfill을 함께 처리합니다.
 
 ```bash
 cd prometheus-api

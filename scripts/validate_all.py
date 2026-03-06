@@ -196,6 +196,19 @@ def main() -> int:
             mark_failure_if_needed(result)
 
             result = run(
+                "backend-hardening-check",
+                [
+                    sys.executable,
+                    "scripts/check_backend_hardening.py",
+                    "--output",
+                    str((backend_artifacts / "hardening-check.json").resolve()),
+                ],
+                REPO_ROOT,
+                backend_artifacts / "backend-hardening-check.log",
+            )
+            mark_failure_if_needed(result)
+
+            result = run(
                 "backend-test",
                 [
                     sys.executable,
@@ -216,6 +229,12 @@ def main() -> int:
                 "backend-lint",
                 REPO_ROOT / "prometheus-api",
                 backend_artifacts / "backend-lint.log",
+                "Skipped because backend-install failed.",
+            )
+            skip(
+                "backend-hardening-check",
+                REPO_ROOT,
+                backend_artifacts / "backend-hardening-check.log",
                 "Skipped because backend-install failed.",
             )
             skip(

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from supabase import Client
 
-from ..core.normalization import normalize_item_name
+from ..core.normalization import NAME_NORMALIZATION_VERSION, normalize_item_name
 from ..core.units import normalize_default_unit
-from ..schemas.schemas import InventoryItem, LowStockSuggestionItem, ShoppingItemInput, ShoppingItemSource, ShoppingItemStatus
+from ..schemas.inventory import InventoryItem, LowStockSuggestionItem
+from ..schemas.shopping import ShoppingItemInput, ShoppingItemSource, ShoppingItemStatus
 from ..services.inventory_service import bulk_upsert_inventory
 
 
@@ -67,7 +68,7 @@ def upsert_pending_shopping_items(
 
     existing_rows = (
         db.table("shopping_items")
-        .select("id,name,quantity,unit")
+        .select("id,name,name_normalized,quantity,unit")
         .eq("device_id", device_id)
         .eq("status", ShoppingItemStatus.PENDING.value)
         .execute()
@@ -89,6 +90,8 @@ def upsert_pending_shopping_items(
             update_row: dict[str, object] = {
                 "id": existing["id"],
                 "device_id": device_id,
+                "name_normalized": key,
+                "name_normalization_version": NAME_NORMALIZATION_VERSION,
                 "quantity": new_quantity,
                 "unit": payload["unit"] or normalize_unit(str(existing.get("unit") or "")),
             }
@@ -107,6 +110,8 @@ def upsert_pending_shopping_items(
             {
                 "device_id": device_id,
                 "name": payload["name"],
+                "name_normalized": key,
+                "name_normalization_version": NAME_NORMALIZATION_VERSION,
                 "quantity": payload["quantity"],
                 "unit": payload["unit"],
                 "status": ShoppingItemStatus.PENDING.value,

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from collections.abc import Mapping
-from threading import Lock
 
 LEGACY_AUTH_COUNTERS_TABLE = "legacy_auth_event_counters"
 LEGACY_AUTH_COUNTERS_RPC = "increment_legacy_auth_event_counter"
 
 logger = logging.getLogger(__name__)
-_MEMORY_COUNTERS: Counter[str] = Counter()
-_LOCK = Lock()
 
 
 def _supports_rpc(db: object | None) -> bool:
@@ -21,14 +17,7 @@ def _supports_table(db: object | None) -> bool:
     return db is not None and hasattr(db, "table")
 
 
-def _record_in_memory(*, outcome: str, reason: str) -> None:
-    key = f"{outcome}:{reason}"
-    with _LOCK:
-        _MEMORY_COUNTERS[key] += 1
-
-
 def record_legacy_auth_event(*, db: object | None = None, outcome: str, reason: str) -> None:
-    _record_in_memory(outcome=outcome, reason=reason)
     logger.warning(
         "auth.legacy_app_token outcome=%s reason=%s",
         outcome,
@@ -42,6 +31,11 @@ def record_legacy_auth_event(*, db: object | None = None, outcome: str, reason: 
     )
 
     if not _supports_rpc(db):
+        logger.warning(
+            "legacy auth event persistence skipped because durable RPC is unavailable outcome=%s reason=%s",
+            outcome,
+            reason,
+        )
         return
 
     try:
@@ -64,8 +58,7 @@ def record_legacy_auth_event(*, db: object | None = None, outcome: str, reason: 
 
 def get_legacy_auth_event_counts(*, db: object | None = None) -> dict[str, int]:
     if not _supports_table(db):
-        with _LOCK:
-            return dict(_MEMORY_COUNTERS)
+        raise RuntimeError("Legacy auth metrics require a durable database handle.")
 
     try:
         rows = (
@@ -79,8 +72,7 @@ def get_legacy_auth_event_counts(*, db: object | None = None) -> dict[str, int]:
         )
     except Exception:
         logger.warning("legacy auth metrics load failed", exc_info=True)
-        with _LOCK:
-            return dict(_MEMORY_COUNTERS)
+        raise
 
     counts: dict[str, int] = {}
     for row in rows:
@@ -98,9 +90,6 @@ def get_legacy_auth_event_counts(*, db: object | None = None) -> dict[str, int]:
 
 
 def reset_legacy_auth_event_counts(*, db: object | None = None) -> None:
-    with _LOCK:
-        _MEMORY_COUNTERS.clear()
-
     if not _supports_table(db):
         return
 

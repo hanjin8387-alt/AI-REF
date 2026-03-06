@@ -7,7 +7,7 @@ from supabase import Client
 
 from ..core.normalization import NAME_NORMALIZATION_VERSION, normalize_item_name
 from ..core.units import normalize_default_unit
-from ..schemas.schemas import InventoryItem
+from ..schemas.inventory import InventoryItem
 from .storage_utils import normalize_storage_category
 
 logger = logging.getLogger(__name__)

@@ -7,8 +7,9 @@ from uuid import UUID, uuid4
 
 from supabase import Client
 
+from ..core.normalization import normalize_item_name
 from ..core.units import normalize_default_unit
-from ..schemas.schemas import Recipe, RecipeIngredient
+from ..schemas.recipes import Recipe, RecipeIngredient
 
 
 def is_valid_uuid(value: str) -> bool:
@@ -37,11 +38,14 @@ def parse_expiry_days(expiry_raw: str | None, today: date) -> int | None:
 def inventory_fingerprint(inventory_rows: list[dict]) -> str:
     normalized = []
     for row in inventory_rows:
+        name = normalize_item_name(str(row.get("name") or row.get("name_normalized") or ""))
+        if not name:
+            continue
         normalized.append(
             {
-                "name": str(row.get("name", "")).strip().lower(),
+                "name": name,
                 "quantity": round(float(row.get("quantity", 0) or 0), 2),
-                "unit": normalize_default_unit(str(row.get("unit") or "")).lower(),
+                "unit": normalize_default_unit(str(row.get("unit") or "")).casefold(),
                 "expiry_date": str(row.get("expiry_date") or ""),
             }
         )
@@ -51,18 +55,24 @@ def inventory_fingerprint(inventory_rows: list[dict]) -> str:
 
 
 def map_generated_recipe(recipe_data: dict, inventory_items: list[dict]) -> Recipe:
+    normalized_inventory: list[tuple[str, dict]] = []
+    for inventory_item in inventory_items:
+        normalized_name = normalize_item_name(inventory_item.get("name"))
+        if normalized_name:
+            normalized_inventory.append((normalized_name, inventory_item))
+
     ingredients: list[RecipeIngredient] = []
     for ingredient_data in recipe_data.get("ingredients", []):
         ingredient_name = str(ingredient_data.get("name", "")).strip()
         if not ingredient_name:
             continue
 
+        ingredient_key = normalize_item_name(ingredient_name)
         matched_inventory = next(
             (
                 inventory_item
-                for inventory_item in inventory_items
-                if inventory_item["name"].lower() in ingredient_name.lower()
-                or ingredient_name.lower() in inventory_item["name"].lower()
+                for inventory_name, inventory_item in normalized_inventory
+                if ingredient_key and (inventory_name == ingredient_key or inventory_name in ingredient_key or ingredient_key in inventory_name)
             ),
             None,
         )

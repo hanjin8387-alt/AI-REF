@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover - optional dependency resolution
     redis = None
 
 from ..core.config import get_settings
-from ..schemas.schemas import Recipe
+from ..schemas.recipes import Recipe
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ class RedisRecipeCache:
 
 def _build_recipe_cache() -> RecipeCacheProtocol:
     settings = get_settings()
-    backend = settings.cache_backend.strip().lower() if settings.cache_backend else "auto"
+    backend = ((settings.cache_backend or "").strip().casefold()) or "auto"
     if backend not in {"auto", "memory", "redis"}:
         logger.warning("unknown CACHE_BACKEND=%s. fallback to auto", backend)
         backend = "auto"

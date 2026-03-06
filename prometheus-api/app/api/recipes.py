@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from supabase import Client
@@ -16,16 +16,18 @@ from ..core.db_columns import (
 )
 from ..core.config import get_settings
 from ..core.database import get_db
+from ..core.idempotency import execute_idempotent_mutation
+from ..core.normalization import normalize_item_name
 from ..core.security import require_app_token, require_device_auth
 from ..core.units import normalize_default_unit
-from ..schemas.schemas import (
+from ..schemas.common import NotificationType
+from ..schemas.recipes import (
     CookCompleteRequest,
     CookCompleteResponse,
     CookingHistoryItem,
     CookingHistoryResponse,
     FavoriteRecipeRequest,
     FavoriteToggleResponse,
-    NotificationType,
     RecommendationJobCreateResponse,
     RecommendationJobStatusResponse,
     Recipe,
@@ -104,7 +106,7 @@ def _expiry_sort_key(row: dict) -> tuple[int, str]:
 
 
 def _find_best_inventory_match(inventory_rows: list[dict], ingredient_name: str) -> dict | None:
-    needle = ingredient_name.strip().lower()
+    needle = normalize_item_name(ingredient_name)
     if not needle:
         return None
 
@@ -117,10 +119,10 @@ def _find_best_inventory_match(inventory_rows: list[dict], ingredient_name: str)
         if quantity <= 0:
             continue
 
-        row_name = str(row.get("name", "")).strip().lower()
+        row_name = normalize_item_name(row.get("name"))
         if not row_name:
             continue
-        if needle in row_name or row_name in needle:
+        if needle == row_name or needle in row_name or row_name in needle:
             matched.append(row)
 
     if not matched:
@@ -271,57 +273,69 @@ async def create_recommendation_job(
     request: Request,
     limit: int = Query(5, ge=1, le=20, description="Number of recipes"),
     force_refresh: bool = Query(False, description="Bypass cache and call Gemini"),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    job_id = str(uuid4())
-    _recommendation_job_cleanup(db)
-    _recommendation_job_upsert(
-        db,
-        job_id=job_id,
-        device_id=device_id,
-        status="pending",
-    )
-
-    async def _run_job() -> None:
+    async def _execute() -> RecommendationJobCreateResponse:
+        job_id = str(uuid4())
+        _recommendation_job_cleanup(db)
         _recommendation_job_upsert(
             db,
             job_id=job_id,
             device_id=device_id,
-            status="processing",
+            status="pending",
         )
 
-        try:
-            response = await _build_recommendation_response(
-                limit=limit,
-                force_refresh=force_refresh,
-                device_id=device_id,
-                db=db,
-                gemini=gemini,
-                recipe_cache=recipe_cache,
-            )
+        async def _run_job() -> None:
             _recommendation_job_upsert(
                 db,
                 job_id=job_id,
                 device_id=device_id,
-                status="completed",
-                recipes=[recipe.model_dump(mode="json") for recipe in response.recipes],
-                total_count=response.total_count,
-            )
-        except Exception as exc:
-            logger.exception("recipe recommendation job failed job_id=%s device_id=%s", job_id, device_id)
-            _recommendation_job_upsert(
-                db,
-                job_id=job_id,
-                device_id=device_id,
-                status="failed",
-                error=str(exc),
+                status="processing",
             )
 
-    asyncio.create_task(_run_job())
-    return RecommendationJobCreateResponse(job_id=job_id, status="pending")
+            try:
+                response = await _build_recommendation_response(
+                    limit=limit,
+                    force_refresh=force_refresh,
+                    device_id=device_id,
+                    db=db,
+                    gemini=gemini,
+                    recipe_cache=recipe_cache,
+                )
+                _recommendation_job_upsert(
+                    db,
+                    job_id=job_id,
+                    device_id=device_id,
+                    status="completed",
+                    recipes=[recipe.model_dump(mode="json") for recipe in response.recipes],
+                    total_count=response.total_count,
+                )
+            except Exception as exc:
+                logger.exception("recipe recommendation job failed job_id=%s device_id=%s", job_id, device_id)
+                _recommendation_job_upsert(
+                    db,
+                    job_id=job_id,
+                    device_id=device_id,
+                    status="failed",
+                    error=str(exc),
+                )
+
+        asyncio.create_task(_run_job())
+        return RecommendationJobCreateResponse(job_id=job_id, status="pending")
+
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request.method,
+        path=request.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"limit": limit, "force_refresh": force_refresh},
+        handler=_execute,
+    )
 
 
 @router.get("/recommendations/jobs/{job_id}", response_model=RecommendationJobStatusResponse)
@@ -391,48 +405,74 @@ async def get_favorite_recipes(
 
 @router.post("/{recipe_id}/favorite", response_model=FavoriteToggleResponse)
 async def add_favorite_recipe(
+    request_context: Request,
     recipe_id: str,
     request: FavoriteRecipeRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    recipe: Recipe | None = None
+    async def _execute() -> FavoriteToggleResponse:
+        recipe: Recipe | None = None
 
-    if request.recipe:
-        if request.recipe.id != recipe_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipe ID does not match the request body.")
-        recipe = request.recipe
-    else:
-        recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
+        if request.recipe:
+            if request.recipe.id != recipe_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipe ID does not match the request body.")
+            recipe = request.recipe
+        else:
+            recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
 
-    if recipe is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Recipe payload is required to save generated recommendations.",
-        )
+        if recipe is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Recipe payload is required to save generated recommendations.",
+            )
 
-    db.table("favorite_recipes").upsert(
-        {
-            "device_id": device_id,
-            "recipe_id": recipe_id,
-            "recipe_data": recipe.model_dump(mode="json"),
-            "title": recipe.title,
-        },
-        on_conflict="device_id,recipe_id",
-    ).execute()
+        db.table("favorite_recipes").upsert(
+            {
+                "device_id": device_id,
+                "recipe_id": recipe_id,
+                "recipe_data": recipe.model_dump(mode="json"),
+                "title": recipe.title,
+            },
+            on_conflict="device_id,recipe_id",
+        ).execute()
 
-    return FavoriteToggleResponse(success=True, is_favorite=True, message="즐겨찾기에 추가했어요.")
+        return FavoriteToggleResponse(success=True, is_favorite=True, message="즐겨찾기에 추가했어요.")
+
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"recipe_id": recipe_id, **request.model_dump(mode="json")},
+        handler=_execute,
+    )
 
 
 @router.delete("/{recipe_id}/favorite", response_model=FavoriteToggleResponse)
 async def remove_favorite_recipe(
+    request: Request,
     recipe_id: str,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    db.table("favorite_recipes").delete().eq("device_id", device_id).eq("recipe_id", recipe_id).execute()
-    return FavoriteToggleResponse(success=True, is_favorite=False, message="즐겨찾기에서 제거했어요.")
+    async def _execute() -> FavoriteToggleResponse:
+        db.table("favorite_recipes").delete().eq("device_id", device_id).eq("recipe_id", recipe_id).execute()
+        return FavoriteToggleResponse(success=True, is_favorite=False, message="즐겨찾기에서 제거했어요.")
+
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request.method,
+        path=request.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"recipe_id": recipe_id, "action": "unfavorite"},
+        handler=_execute,
+    )
 
 
 @router.get("/history", response_model=CookingHistoryResponse)
@@ -499,141 +539,153 @@ async def get_recipe(
 
 @router.post("/{recipe_id}/cook", response_model=CookCompleteResponse)
 async def complete_cooking(
+    request_context: Request,
     recipe_id: str,
     request: CookCompleteRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    if request.servings <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Servings must be at least 1.")
+    async def _execute() -> CookCompleteResponse:
+        if request.servings <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Servings must be at least 1.")
 
-    recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
-    if not recipe:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found.")
+        recipe = _load_recipe_from_sources(recipe_id, device_id, db, recipe_cache)
+        if not recipe:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found.")
 
-    deducted_items: list[dict] = []
-    base_servings = recipe.servings if recipe.servings > 0 else 1
-    multiplier = request.servings / base_servings
+        deducted_items: list[dict] = []
+        base_servings = recipe.servings if recipe.servings > 0 else 1
+        multiplier = request.servings / base_servings
 
-    inventory_result = db.table("inventory").select(INVENTORY_SELECT_COLUMNS).eq("device_id", device_id).execute()
-    working_inventory: list[dict] = [dict(row) for row in (inventory_result.data or [])]
-    quantity_updates: dict[str, float] = {}
-    deleted_ids: set[str] = set()
+        inventory_result = db.table("inventory").select(INVENTORY_SELECT_COLUMNS).eq("device_id", device_id).execute()
+        working_inventory: list[dict] = [dict(row) for row in (inventory_result.data or [])]
+        quantity_updates: dict[str, float] = {}
+        deleted_ids: set[str] = set()
 
-    for ingredient in recipe.ingredients:
-        deduct_qty = max(0.0, ingredient.quantity * multiplier)
-        if deduct_qty <= 0:
-            continue
+        for ingredient in recipe.ingredients:
+            deduct_qty = max(0.0, ingredient.quantity * multiplier)
+            if deduct_qty <= 0:
+                continue
 
-        inv_item = _find_best_inventory_match(working_inventory, ingredient.name)
-        if not inv_item:
-            continue
+            inv_item = _find_best_inventory_match(working_inventory, ingredient.name)
+            if not inv_item:
+                continue
 
-        inv_item_id = str(inv_item.get("id"))
-        if not inv_item_id:
-            continue
+            inv_item_id = str(inv_item.get("id"))
+            if not inv_item_id:
+                continue
 
-        current_qty = float(inv_item.get("quantity", 0))
-        new_qty = max(0.0, current_qty - deduct_qty)
+            current_qty = float(inv_item.get("quantity", 0))
+            new_qty = max(0.0, current_qty - deduct_qty)
 
-        if new_qty <= 0:
-            inv_item["quantity"] = 0.0
-            deleted_ids.add(inv_item_id)
-            quantity_updates.pop(inv_item_id, None)
-            deducted_items.append(
-                {
-                    "name": inv_item["name"],
-                    "deducted": current_qty,
-                    "remaining": 0,
-                    "deleted": True,
-                }
-            )
-        else:
-            rounded_qty = round(new_qty, 2)
-            inv_item["quantity"] = rounded_qty
-            quantity_updates[inv_item_id] = rounded_qty
-            deleted_ids.discard(inv_item_id)
-            deducted_items.append(
-                {
-                    "name": inv_item["name"],
-                    "deducted": round(deduct_qty, 2),
-                    "remaining": rounded_qty,
-                    "deleted": False,
-                }
-            )
-
-    inventory_updates = [
-        {"id": item_id, "quantity": new_qty}
-        for item_id, new_qty in quantity_updates.items()
-    ]
-    recipe_uuid = recipe.id if is_valid_uuid(recipe.id) else None
-    history_id = None
-    try:
-        rpc_result = db.rpc(
-            "complete_cooking_transaction",
-            {
-                "p_device_id": device_id,
-                "p_recipe_id": recipe_uuid,
-                "p_recipe_title": recipe.title,
-                "p_servings": request.servings,
-                "p_deducted_items": deducted_items,
-                "p_updates": inventory_updates,
-                "p_delete_ids": list(deleted_ids),
-            },
-        ).execute()
-        rpc_data = rpc_result.data
-        if isinstance(rpc_data, list):
-            first = rpc_data[0] if rpc_data else None
-            if isinstance(first, dict):
-                history_id = (
-                    first.get("complete_cooking_transaction")
-                    or first.get("history_id")
-                    or first.get("result")
+            if new_qty <= 0:
+                inv_item["quantity"] = 0.0
+                deleted_ids.add(inv_item_id)
+                quantity_updates.pop(inv_item_id, None)
+                deducted_items.append(
+                    {
+                        "name": inv_item["name"],
+                        "deducted": current_qty,
+                        "remaining": 0,
+                        "deleted": True,
+                    }
                 )
-            elif first is not None:
-                history_id = str(first)
-        elif isinstance(rpc_data, dict):
-            history_id = (
-                rpc_data.get("complete_cooking_transaction")
-                or rpc_data.get("history_id")
-                or rpc_data.get("result")
+            else:
+                rounded_qty = round(new_qty, 2)
+                inv_item["quantity"] = rounded_qty
+                quantity_updates[inv_item_id] = rounded_qty
+                deleted_ids.discard(inv_item_id)
+                deducted_items.append(
+                    {
+                        "name": inv_item["name"],
+                        "deducted": round(deduct_qty, 2),
+                        "remaining": rounded_qty,
+                        "deleted": False,
+                    }
+                )
+
+        inventory_updates = [
+            {"id": item_id, "quantity": new_qty}
+            for item_id, new_qty in quantity_updates.items()
+        ]
+        recipe_uuid = recipe.id if is_valid_uuid(recipe.id) else None
+        history_id = None
+        try:
+            rpc_result = db.rpc(
+                "complete_cooking_transaction",
+                {
+                    "p_device_id": device_id,
+                    "p_recipe_id": recipe_uuid,
+                    "p_recipe_title": recipe.title,
+                    "p_servings": request.servings,
+                    "p_deducted_items": deducted_items,
+                    "p_updates": inventory_updates,
+                    "p_delete_ids": list(deleted_ids),
+                },
+            ).execute()
+            rpc_data = rpc_result.data
+            if isinstance(rpc_data, list):
+                first = rpc_data[0] if rpc_data else None
+                if isinstance(first, dict):
+                    history_id = (
+                        first.get("complete_cooking_transaction")
+                        or first.get("history_id")
+                        or first.get("result")
+                    )
+                elif first is not None:
+                    history_id = str(first)
+            elif isinstance(rpc_data, dict):
+                history_id = (
+                    rpc_data.get("complete_cooking_transaction")
+                    or rpc_data.get("history_id")
+                    or rpc_data.get("result")
+                )
+            elif rpc_data is not None:
+                history_id = str(rpc_data)
+
+            if not history_id:
+                raise RuntimeError("complete_cooking_transaction returned empty history id")
+        except Exception as exc:
+            logger.exception("complete cooking failed recipe_id=%s device_id=%s", recipe_id, device_id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to complete cooking transaction.",
+            ) from exc
+
+        recipe_cache.invalidate_device(device_id)
+
+        for item in deducted_items:
+            log_inventory_change(
+                db, device_id, item["name"], "cook",
+                quantity_change=-item["deducted"],
+                metadata={"recipe_title": recipe.title, "recipe_id": recipe.id},
             )
-        elif rpc_data is not None:
-            history_id = str(rpc_data)
 
-        if not history_id:
-            raise RuntimeError("complete_cooking_transaction returned empty history id")
-    except Exception as exc:
-        logger.exception("complete cooking failed recipe_id=%s device_id=%s", recipe_id, device_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to complete cooking transaction.",
-        ) from exc
-
-    recipe_cache.invalidate_device(device_id)
-
-    # Log inventory changes for statistics
-    for item in deducted_items:
-        log_inventory_change(
-            db, device_id, item["name"], "cook",
-            quantity_change=-item["deducted"],
-            metadata={"recipe_title": recipe.title, "recipe_id": recipe.id},
+        create_notification(
+            db=db,
+            device_id=device_id,
+            notification_type=NotificationType.COOKING,
+            title="요리를 완료했어요",
+            message=f"{recipe.title}를 {request.servings}인분 요리했어요.",
+            metadata={"recipe_id": recipe.id, "history_id": history_id, "deducted_count": len(deducted_items)},
         )
 
-    create_notification(
-        db=db,
-        device_id=device_id,
-        notification_type=NotificationType.COOKING,
-        title="요리를 완료했어요",
-        message=f"{recipe.title}를 {request.servings}인분 요리했어요.",
-        metadata={"recipe_id": recipe.id, "history_id": history_id, "deducted_count": len(deducted_items)},
-    )
+        return CookCompleteResponse(
+            success=True,
+            message=f"요리를 완료했어요. 재료 {len(deducted_items)}개를 사용했어요.",
+            deducted_items=deducted_items,
+        )
 
-    return CookCompleteResponse(
-        success=True,
-        message=f"요리를 완료했어요. 재료 {len(deducted_items)}개를 사용했어요.",
-        deducted_items=deducted_items,
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"recipe_id": recipe_id, **request.model_dump(mode="json")},
+        handler=_execute,
     )
 
 

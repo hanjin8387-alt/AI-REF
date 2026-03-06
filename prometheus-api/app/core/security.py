@@ -27,7 +27,7 @@ def require_app_token(
     resolved_db = _resolve_optional_db(db)
 
     if x_app_id:
-        app_id = x_app_id.strip().lower()
+        app_id = x_app_id.strip().casefold()
         if not app_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

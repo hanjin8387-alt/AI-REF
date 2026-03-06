@@ -1,8 +1,9 @@
-﻿import logging
+import logging
 import os
 import re
 import uuid
 from datetime import datetime
+from hashlib import sha256
 
 import httpx
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
@@ -13,19 +14,12 @@ from supabase import Client
 from ..core.config import get_settings
 from ..core.db_columns import SCAN_SELECT_COLUMNS
 from ..core.database import get_db
-from ..core.idempotency import load_idempotent_response, save_idempotent_response
+from ..core.idempotency import execute_idempotent_mutation
 from ..core.security import require_app_token, require_device_auth
 from ..core.units import normalize_default_unit
-from ..schemas.schemas import (
-    BarcodeProductInfo,
-    BarcodeResponse,
-    FoodItem,
-    OperationStatus,
-    ScanResultResponse,
-    ScanSourceType,
-    ScanStatus,
-    ScanUploadResponse,
-)
+from ..schemas.common import OperationStatus, ScanSourceType, ScanStatus
+from ..schemas.inventory import BarcodeProductInfo, BarcodeResponse, FoodItem
+from ..schemas.scans import ScanResultResponse, ScanUploadResponse
 from ..services.gemini_service import GeminiContractError, GeminiService, get_gemini_service
 from ..services.storage_utils import STORAGE_CATEGORIES, guess_storage_from_name, normalize_storage_category
 
@@ -39,6 +33,7 @@ router = APIRouter(
     tags=["scans"],
     dependencies=[Depends(require_app_token)],
 )
+
 
 def _normalize_unit(value: str | None) -> str:
     return normalize_default_unit(value)
@@ -104,7 +99,7 @@ def _extract_receipt_metadata(raw_text: str | None) -> tuple[str | None, str | N
             continue
         parts = [int(value) for value in match.groups()]
         try:
-            if len(parts[0].__str__()) == 2 and parts[0] < 100:  # yy-mm-dd
+            if len(parts[0].__str__()) == 2 and parts[0] < 100:
                 year = 2000 + parts[0]
                 month = parts[1]
                 day = parts[2]
@@ -149,7 +144,7 @@ def _extract_item_prices(items: list[FoodItem], raw_text: str | None) -> list[Fo
         for compact, original in line_cache:
             if item_key and item_key not in compact:
                 continue
-            numbers = [m.group(1) for m in price_pattern.finditer(original)]
+            numbers = [match.group(1) for match in price_pattern.finditer(original)]
             if not numbers:
                 continue
             parsed_numbers = [_safe_amount(value) for value in numbers]
@@ -224,138 +219,133 @@ async def upload_scan(
     db: Client = Depends(get_db),
     gemini: GeminiService = Depends(get_gemini_service),
 ):
-    replayed = load_idempotent_response(
+    settings = get_settings()
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only image files are supported.",
+        )
+
+    mime_type = file.content_type or "image/jpeg"
+    max_upload_bytes = settings.max_upload_size_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    total_size = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Image file is too large. Maximum allowed size is {settings.max_upload_size_mb}MB.",
+            )
+        chunks.append(chunk)
+
+    image_bytes = b"".join(chunks)
+    original_filename = _normalize_original_filename(file.filename)
+
+    async def _execute() -> ScanUploadResponse:
+        scan_id = str(uuid.uuid4())
+
+        try:
+            scan_row = {
+                "id": scan_id,
+                "device_id": device_id,
+                "source_type": source_type.value,
+                "status": ScanStatus.PROCESSING.value,
+                "original_filename": original_filename,
+            }
+            try:
+                db.table("scans").insert(scan_row).execute()
+            except Exception as insert_exc:
+                if not _is_filename_too_long_error(insert_exc):
+                    raise
+                logger.warning("scan filename exceeded DB column length; retrying with fallback filename")
+                scan_row["original_filename"] = DEFAULT_SCAN_FILENAME
+                db.table("scans").insert(scan_row).execute()
+
+            raw_text = None
+            if source_type == ScanSourceType.RECEIPT:
+                items, raw_text = await gemini.analyze_receipt_image(image_bytes, mime_type)
+            else:
+                items = await gemini.analyze_food_image(image_bytes, mime_type)
+
+            items = _extract_item_prices(_enrich_scan_items_with_storage(items), raw_text)
+            receipt_store, receipt_purchased_on = _extract_receipt_metadata(raw_text)
+
+            db.table("scans").update(
+                {
+                    "status": ScanStatus.COMPLETED.value,
+                    "items": [item.model_dump(mode="json") for item in items],
+                    "raw_text": raw_text,
+                }
+            ).eq("id", scan_id).eq("device_id", device_id).execute()
+
+            if source_type == ScanSourceType.RECEIPT:
+                _persist_price_history(
+                    db,
+                    device_id=device_id,
+                    scan_id=scan_id,
+                    source_type=source_type,
+                    items=items,
+                    store_name=receipt_store,
+                    purchased_on=receipt_purchased_on,
+                )
+
+            return ScanUploadResponse(
+                scan_id=scan_id,
+                status=ScanStatus.COMPLETED,
+                message=f"{len(items)}개 항목을 감지했어요.",
+                result_status=OperationStatus.OK,
+                warnings=[],
+            )
+        except GeminiContractError as exc:
+            logger.exception("scan upload failed due to gemini contract scan_id=%s device_id=%s", scan_id, device_id)
+            db.table("scans").update(
+                {
+                    "status": ScanStatus.FAILED.value,
+                    "error_message": "AI response validation failed.",
+                }
+            ).eq("id", scan_id).eq("device_id", device_id).execute()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "status": "failed",
+                    "error_code": exc.code,
+                    "message": str(exc),
+                    "warnings": ["No inventory updates were applied."],
+                },
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("scan upload failed scan_id=%s device_id=%s", scan_id, device_id)
+            db.table("scans").update(
+                {
+                    "status": ScanStatus.FAILED.value,
+                    "error_message": "스캔 처리에 실패했어요.",
+                }
+            ).eq("id", scan_id).eq("device_id", device_id).execute()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to analyze scan image.",
+            ) from exc
+
+    return await execute_idempotent_mutation(
         db,
         device_id=device_id,
         method=request.method,
         path=request.url.path,
         idempotency_key=x_idempotency_key,
-    )
-    if replayed is not None:
-        return replayed
-
-    settings = get_settings()
-    scan_id = str(uuid.uuid4())
-
-    try:
-        if not file.content_type or not file.content_type.startswith("image/"):
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail="Only image files are supported.",
-            )
-
-        mime_type = file.content_type or "image/jpeg"
-        max_upload_bytes = settings.max_upload_size_mb * 1024 * 1024
-        chunks: list[bytes] = []
-        total_size = 0
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            total_size += len(chunk)
-            if total_size > max_upload_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"Image file is too large. Maximum allowed size is {settings.max_upload_size_mb}MB.",
-                )
-            chunks.append(chunk)
-        image_bytes = b"".join(chunks)
-
-        original_filename = _normalize_original_filename(file.filename)
-
-        scan_row = {
-            "id": scan_id,
-            "device_id": device_id,
+        request_payload={
             "source_type": source_type.value,
-            "status": ScanStatus.PROCESSING.value,
+            "content_type": mime_type,
             "original_filename": original_filename,
-        }
-        try:
-            db.table("scans").insert(scan_row).execute()
-        except Exception as insert_exc:
-            if not _is_filename_too_long_error(insert_exc):
-                raise
-            logger.warning("scan filename exceeded DB column length; retrying with fallback filename")
-            scan_row["original_filename"] = DEFAULT_SCAN_FILENAME
-            db.table("scans").insert(scan_row).execute()
-
-        raw_text = None
-        if source_type == ScanSourceType.RECEIPT:
-            items, raw_text = await gemini.analyze_receipt_image(image_bytes, mime_type)
-        else:
-            items = await gemini.analyze_food_image(image_bytes, mime_type)
-
-        items = _extract_item_prices(_enrich_scan_items_with_storage(items), raw_text)
-        receipt_store, receipt_purchased_on = _extract_receipt_metadata(raw_text)
-
-        db.table("scans").update(
-            {
-                "status": ScanStatus.COMPLETED.value,
-                "items": [item.model_dump(mode="json") for item in items],
-                "raw_text": raw_text,
-            }
-        ).eq("id", scan_id).eq("device_id", device_id).execute()
-
-        if source_type == ScanSourceType.RECEIPT:
-            _persist_price_history(
-                db,
-                device_id=device_id,
-                scan_id=scan_id,
-                source_type=source_type,
-                items=items,
-                store_name=receipt_store,
-                purchased_on=receipt_purchased_on,
-            )
-
-        response = ScanUploadResponse(
-            scan_id=scan_id,
-            status=ScanStatus.COMPLETED,
-            message=f"{len(items)}개 항목을 감지했어요.",
-            result_status=OperationStatus.OK,
-            warnings=[],
-        )
-        save_idempotent_response(
-            db,
-            device_id=device_id,
-            method=request.method,
-            path=request.url.path,
-            idempotency_key=x_idempotency_key,
-            status_code=status.HTTP_200_OK,
-            payload=response.model_dump(mode="json"),
-        )
-        return response
-    except GeminiContractError as exc:
-        logger.exception("scan upload failed due to gemini contract scan_id=%s device_id=%s", scan_id, device_id)
-        db.table("scans").update(
-            {
-                "status": ScanStatus.FAILED.value,
-                "error_message": "AI response validation failed.",
-            }
-        ).eq("id", scan_id).eq("device_id", device_id).execute()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "status": "failed",
-                "error_code": exc.code,
-                "message": str(exc),
-                "warnings": ["No inventory updates were applied."],
-            },
-        ) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("scan upload failed scan_id=%s device_id=%s", scan_id, device_id)
-        db.table("scans").update(
-            {
-                "status": ScanStatus.FAILED.value,
-                "error_message": "스캔 처리에 실패했어요.",
-            }
-        ).eq("id", scan_id).eq("device_id", device_id).execute()
-
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to analyze scan image.",
-        ) from exc
+            "image_sha256": sha256(image_bytes).hexdigest(),
+        },
+        handler=_execute,
+    )
 
 
 @router.get("/{scan_id}/result", response_model=ScanResultResponse)

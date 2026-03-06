@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from supabase import Client
 
 from ..core.db_columns import NOTIFICATION_SELECT_COLUMNS
 from ..core.database import get_db
+from ..core.idempotency import execute_idempotent_mutation
 from ..core.security import require_app_token, require_device_auth
-from ..schemas.schemas import (
+from ..schemas.notifications import (
     MarkNotificationsReadRequest,
     MarkNotificationsReadResponse,
     NotificationItem,
@@ -60,16 +61,29 @@ async def get_notifications(
 
 @router.post("/read", response_model=MarkNotificationsReadResponse)
 async def mark_notifications_read(
+    request_context: Request,
     request: MarkNotificationsReadRequest,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    payload = {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}
-    query = db.table("notifications").update(payload).eq("device_id", device_id).eq("is_read", False)
+    async def _execute() -> MarkNotificationsReadResponse:
+        payload = {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}
+        query = db.table("notifications").update(payload).eq("device_id", device_id).eq("is_read", False)
 
-    if request.ids:
-        query = query.in_("id", request.ids)
+        if request.ids:
+            query = query.in_("id", request.ids)
 
-    result = query.execute()
-    updated_count = len(result.data or [])
-    return MarkNotificationsReadResponse(success=True, updated_count=updated_count)
+        result = query.execute()
+        updated_count = len(result.data or [])
+        return MarkNotificationsReadResponse(success=True, updated_count=updated_count)
+
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request_context.method,
+        path=request_context.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload=request.model_dump(mode="json"),
+        handler=_execute,
+    )

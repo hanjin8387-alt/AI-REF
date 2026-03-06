@@ -7,7 +7,7 @@ def normalize_storage_category(value: str | None) -> str | None:
     if value is None:
         return None
 
-    normalized = str(value).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+    normalized = str(value).strip().casefold().replace("_", "").replace("-", "").replace(" ", "")
     if not normalized:
         return None
 

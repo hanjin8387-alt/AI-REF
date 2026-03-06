@@ -7,12 +7,23 @@ from pathlib import Path
 
 from app.core.database import get_supabase_client
 from app.services.inventory_reconciliation import plan_inventory_name_reconciliation
+from app.services.shopping_reconciliation import plan_shopping_name_reconciliation
 
 
 def _load_rows(device_id: str | None = None) -> list[dict]:
     db = get_supabase_client()
     query = db.table("inventory").select(
         "id,device_id,name,name_normalized,name_normalization_version,quantity,unit,expiry_date,category,created_at"
+    )
+    if device_id:
+        query = query.eq("device_id", device_id)
+    return query.execute().data or []
+
+
+def _load_shopping_rows(device_id: str | None = None) -> list[dict]:
+    db = get_supabase_client()
+    query = db.table("shopping_items").select(
+        "id,device_id,name,name_normalized,name_normalization_version,unit"
     )
     if device_id:
         query = query.eq("device_id", device_id)
@@ -31,6 +42,21 @@ def _apply_plan(actions: list[dict]) -> None:
             db.table("inventory").delete().in_("id", merge_ids).execute()
 
 
+def _apply_shopping_plan(actions: list[dict]) -> None:
+    db = get_supabase_client()
+    for action in actions:
+        row_id = str(action["row_id"])
+        device_id = str(action["device_id"])
+        update_payload = dict(action.get("update_payload") or {})
+        (
+            db.table("shopping_items")
+            .update(update_payload)
+            .eq("id", row_id)
+            .eq("device_id", device_id)
+            .execute()
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile inventory.name_normalized with the runtime canonicalizer.")
     parser.add_argument("--device-id", help="Optional single-device scope")
@@ -39,7 +65,9 @@ def main() -> int:
     args = parser.parse_args()
 
     rows = _load_rows(args.device_id)
+    shopping_rows = _load_shopping_rows(args.device_id)
     plan = plan_inventory_name_reconciliation(rows)
+    shopping_plan = plan_shopping_name_reconciliation(shopping_rows)
     payload = {
         "mode": "apply" if args.apply else "dry-run",
         "rows_seen": plan.rows_seen,
@@ -53,10 +81,24 @@ def main() -> int:
             }
             for action in plan.actions
         ],
+        "shopping_items": {
+            "rows_seen": shopping_plan.rows_seen,
+            "rows_to_update": shopping_plan.rows_to_update,
+            "actions": [
+                {
+                    "row_id": action.row_id,
+                    "device_id": action.device_id,
+                    "update_payload": action.update_payload,
+                }
+                for action in shopping_plan.actions
+            ],
+        },
     }
 
     if args.apply and plan.actions:
         _apply_plan(payload["actions"])
+    if args.apply and shopping_plan.actions:
+        _apply_shopping_plan(payload["shopping_items"]["actions"])
 
     if args.output:
         output_path = Path(args.output)

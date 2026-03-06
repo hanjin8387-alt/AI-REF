@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fastapi import HTTPException, status
+
 from ...core.db_columns import (
     COOKING_HISTORY_SELECT_COLUMNS,
     FAVORITE_RECIPE_SELECT_COLUMNS,
@@ -11,10 +13,12 @@ from ...core.db_columns import (
 )
 from ...core.normalization import NAME_NORMALIZATION_VERSION, normalize_item_name
 from ...core.units import normalize_default_unit
-from ...schemas.schemas import BackupTableResult, OperationStatus
+from ...schemas.backup import BackupTableResult
+from ...schemas.common import OperationStatus
 from ..storage_utils import normalize_storage_category
 
 BACKUP_VERSION = "backup-v1"
+BACKUP_RESTORE_RPC = "restore_device_backup_payload"
 BACKUP_TABLES = [
     "inventory",
     "shopping_items",
@@ -47,6 +51,22 @@ def safe_rows(payload: dict, table: str) -> list[dict]:
 
 def backup_status_from_warnings(warnings: list[str]) -> OperationStatus:
     return OperationStatus.DEGRADED if warnings else OperationStatus.OK
+
+
+def validate_restore_payload(payload: object) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Backup restore payload must be a JSON object.",
+        )
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Backup restore payload.data must be a JSON object.",
+        )
+    return payload
 
 
 def inventory_upsert_rows(device_id: str, rows: list[dict]) -> list[dict]:
@@ -99,6 +119,53 @@ def passthrough_rows(device_id: str, rows: list[dict]) -> list[dict]:
             normalized["unit"] = normalize_default_unit(normalized.get("unit"))
         insert_rows.append(normalized)
     return insert_rows
+
+
+def shopping_item_rows(device_id: str, rows: list[dict]) -> list[dict]:
+    insert_rows: list[dict] = []
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        name_normalized = normalize_item_name(row.get("name_normalized") or name)
+        if not name or not name_normalized:
+            continue
+
+        normalized = dict(row)
+        normalized["device_id"] = device_id
+        normalized["name"] = name
+        normalized["name_normalized"] = name_normalized
+        normalized["name_normalization_version"] = NAME_NORMALIZATION_VERSION
+        normalized["unit"] = normalize_default_unit(normalized.get("unit"))
+        normalized.pop("id", None)
+        insert_rows.append(normalized)
+    return insert_rows
+
+
+def build_restore_payload(payload: dict, *, device_id: str) -> dict[str, list[dict]]:
+    validated = validate_restore_payload(payload)
+    return {
+        "inventory": inventory_upsert_rows(device_id, safe_rows(validated, "inventory")),
+        "shopping_items": shopping_item_rows(device_id, safe_rows(validated, "shopping_items")),
+        "favorite_recipes": favorite_recipe_rows(device_id, safe_rows(validated, "favorite_recipes")),
+        "cooking_history": passthrough_rows(device_id, safe_rows(validated, "cooking_history")),
+        "notifications": passthrough_rows(device_id, safe_rows(validated, "notifications")),
+        "inventory_logs": passthrough_rows(device_id, safe_rows(validated, "inventory_logs")),
+        "price_history": passthrough_rows(device_id, safe_rows(validated, "price_history")),
+    }
+
+
+def parse_restore_counts(data: object) -> dict[str, int]:
+    payload = data[0] if isinstance(data, list) and data else data
+    if not isinstance(payload, dict):
+        return {table: 0 for table in BACKUP_TABLES}
+
+    counts: dict[str, int] = {}
+    for table in BACKUP_TABLES:
+        raw_value = payload.get(table)
+        try:
+            counts[table] = int(raw_value or 0)
+        except (TypeError, ValueError):
+            counts[table] = 0
+    return counts
 
 
 def ok_result(table: str, *, row_count: int) -> BackupTableResult:

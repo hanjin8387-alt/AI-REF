@@ -22,7 +22,7 @@ SCAN_SELECT_COLUMNS = "id,device_id,source_type,status,original_filename,items,r
 NOTIFICATION_SELECT_COLUMNS = "id,device_id,type,title,message,metadata,is_read,read_at,created_at"
 
 SHOPPING_ITEM_SELECT_COLUMNS = (
-    "id,device_id,name,quantity,unit,status,source,recipe_id,recipe_title,"
+    "id,device_id,name,name_normalized,name_normalization_version,quantity,unit,status,source,recipe_id,recipe_title,"
     "added_to_inventory,purchased_at,created_at,updated_at"
 )
 

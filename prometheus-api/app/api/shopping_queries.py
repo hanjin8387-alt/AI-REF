@@ -10,7 +10,8 @@ from supabase import Client
 from ..core.db_columns import SHOPPING_ITEM_SELECT_COLUMNS
 from ..core.database import get_db
 from ..core.security import require_device_auth
-from ..schemas.schemas import LowStockSuggestionResponse, ShoppingItem, ShoppingItemStatus, ShoppingListResponse
+from ..schemas.inventory import LowStockSuggestionResponse
+from ..schemas.shopping import ShoppingItem, ShoppingItemStatus, ShoppingListResponse
 from ..use_cases.shopping_use_cases import build_low_stock_suggestions
 from .shopping_support import handle_shopping_table_error
 

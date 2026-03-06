@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.normalization import normalize_item_name
 from app.core.units import DEFAULT_UNIT
 from app.services.inventory_reconciliation import plan_inventory_name_reconciliation
 
@@ -43,3 +44,9 @@ def test_reconciliation_merges_runtime_canonical_duplicates() -> None:
   assert action.update_payload['quantity'] == 3
   assert action.update_payload['unit'] == DEFAULT_UNIT
   assert action.update_payload['expiry_date'] == '2026-03-08'
+
+
+def test_runtime_canonicalizer_handles_nfkc_casefold_and_whitespace() -> None:
+  assert normalize_item_name("  Ｍilk  ") == "milk"
+  assert normalize_item_name("Straße") == "strasse"
+  assert normalize_item_name("  tofu\t  stew  ") == "tofu stew"

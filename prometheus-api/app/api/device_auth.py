@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from supabase import Client
 
 from ..core.database import get_db
-from ..core.security import get_device_id, require_device_auth
-from ..schemas.schemas import (
+from ..core.idempotency import execute_idempotent_mutation
+from ..core.security import get_device_id, hash_device_token, require_device_auth
+from ..schemas.auth import (
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     DeviceTokenRevokeResponse,
@@ -22,12 +23,14 @@ router = APIRouter()
 
 @router.post("/device-register", response_model=DeviceRegisterResponse)
 async def register_device_route(
+    request_context: Request,
     request: DeviceRegisterRequest,
+    x_idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
     device_id: str = Depends(get_device_id),
     x_device_token: Annotated[str | None, Header(alias="X-Device-Token")] = None,
     db: Client = Depends(get_db),
 ):
-    try:
+    async def _execute() -> DeviceRegisterResponse:
         return register_device(
             db,
             request_device_id=request.device_id,
@@ -36,6 +39,20 @@ async def register_device_route(
             push_token=request.push_token,
             platform=request.platform,
             app_version=request.app_version,
+        )
+
+    try:
+        return await execute_idempotent_mutation(
+            db,
+            device_id=device_id,
+            method=request_context.method,
+            path=request_context.url.path,
+            idempotency_key=x_idempotency_key,
+            request_payload={
+                **request.model_dump(mode="json"),
+                "current_device_token_hash": hash_device_token(x_device_token) if x_device_token else None,
+            },
+            handler=_execute,
         )
     except HTTPException:
         raise
@@ -49,15 +66,35 @@ async def register_device_route(
 
 @router.post("/device-token/rotate", response_model=DeviceTokenRotateResponse)
 async def rotate_device_token_route(
+    request: Request,
+    x_idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    return rotate_device_token(db, device_id=device_id)
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request.method,
+        path=request.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"device_id": device_id, "action": "rotate"},
+        handler=lambda: rotate_device_token(db, device_id=device_id),
+    )
 
 
 @router.post("/device-token/revoke", response_model=DeviceTokenRevokeResponse)
 async def revoke_device_token_route(
+    request: Request,
+    x_idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    return revoke_device_token(db, device_id=device_id)
+    return await execute_idempotent_mutation(
+        db,
+        device_id=device_id,
+        method=request.method,
+        path=request.url.path,
+        idempotency_key=x_idempotency_key,
+        request_payload={"device_id": device_id, "action": "revoke"},
+        handler=lambda: revoke_device_token(db, device_id=device_id),
+    )

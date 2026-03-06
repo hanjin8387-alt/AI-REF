@@ -3,7 +3,7 @@ import logging
 
 from supabase import Client
 
-from ..schemas.schemas import NotificationType
+from ..schemas.common import NotificationType
 
 logger = logging.getLogger(__name__)
 

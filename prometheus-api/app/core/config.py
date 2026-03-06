@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     @property
     def is_production_like(self) -> bool:
-        return self.environment.lower() in {"production", "prod", "staging", "stage"}
+        return self.environment.casefold() in {"production", "prod", "staging", "stage"}
 
     @property
     def parsed_allowed_device_ids(self) -> set[str]:
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
         raw = self.app_ids.strip()
         if not raw:
             return set()
-        return {item.strip().lower() for item in raw.split(",") if item.strip()}
+        return {item.strip().casefold() for item in raw.split(",") if item.strip()}
 
     model_config = SettingsConfigDict(
         env_file=".env",

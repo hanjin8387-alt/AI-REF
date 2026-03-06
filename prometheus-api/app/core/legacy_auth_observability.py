@@ -12,16 +12,13 @@ from ..services.auth.legacy_metrics import (
 
 def get_legacy_auth_event_counts(db: Client | None = None) -> dict[str, int]:
     if db is None:
-        try:
-            db = get_supabase_client()
-        except Exception:
-            return {}
-    return _get_legacy_auth_event_counts(db)
+        db = get_supabase_client()
+    return _get_legacy_auth_event_counts(db=db)
 
 
 def record_legacy_auth_event(*, db: Client | None = None, outcome: str, reason: str) -> None:
     _record_legacy_auth_event(db=db, outcome=outcome, reason=reason)
 
 
-def reset_legacy_auth_event_counts() -> None:
-    _reset_legacy_auth_event_counts()
+def reset_legacy_auth_event_counts(db: Client | None = None) -> None:
+    _reset_legacy_auth_event_counts(db=db)

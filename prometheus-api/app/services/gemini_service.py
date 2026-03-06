@@ -11,7 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from ..core.config import get_settings
 from ..core.units import DEFAULT_UNIT
-from ..schemas.schemas import FoodItem
+from ..schemas.inventory import FoodItem
 
 logger = logging.getLogger(__name__)
 GEMINI_TIMEOUT_SECONDS = 30
