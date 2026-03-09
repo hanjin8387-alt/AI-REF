@@ -67,13 +67,14 @@ async def mark_notifications_read(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> MarkNotificationsReadResponse:
+    async def _execute(context) -> MarkNotificationsReadResponse:
         payload = {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}
         query = db.table("notifications").update(payload).eq("device_id", device_id).eq("is_read", False)
 
         if request.ids:
             query = query.in_("id", request.ids)
 
+        context.ensure_active()
         result = query.execute()
         updated_count = len(result.data or [])
         return MarkNotificationsReadResponse(success=True, updated_count=updated_count)

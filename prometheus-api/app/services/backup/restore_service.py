@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from supabase import Client
 
+from ...core.idempotency import IdempotencyExecutionContext
 from ...schemas.backup import BackupRestoreRequest, BackupRestoreResponse
 from .common import (
     BACKUP_RESTORE_RPC,
@@ -14,12 +15,21 @@ from .common import (
 )
 
 
-def restore_backup(db: Client, *, device_id: str, payload: dict, mode: str) -> BackupRestoreResponse:
+def restore_backup(
+    db: Client,
+    *,
+    device_id: str,
+    payload: dict,
+    mode: str,
+    idempotency_context: IdempotencyExecutionContext | None = None,
+) -> BackupRestoreResponse:
     restore_mode = (mode or "merge").strip().casefold()
     if restore_mode not in {"merge", "replace"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be either merge or replace.")
 
     prepared_payload = build_restore_payload(payload, device_id=device_id)
+    if idempotency_context is not None:
+        idempotency_context.ensure_active()
 
     try:
         rpc_result = db.rpc(

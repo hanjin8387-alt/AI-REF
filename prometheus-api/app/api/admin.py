@@ -119,7 +119,7 @@ async def check_expiring_items(
     _: None = Depends(_require_admin_token),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> ExpiryCheckResponse:
+    async def _execute(context) -> ExpiryCheckResponse:
         today = datetime.now().date()
         threshold = today + timedelta(days=3)
 
@@ -145,6 +145,7 @@ async def check_expiring_items(
 
         for device_id, items in device_items.items():
             try:
+                context.ensure_active()
                 title, message = _build_expiry_message(today, items)
                 create_notification(
                     db=db,

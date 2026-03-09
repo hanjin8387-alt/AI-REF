@@ -30,7 +30,8 @@ async def register_device_route(
     x_device_token: Annotated[str | None, Header(alias="X-Device-Token")] = None,
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> DeviceRegisterResponse:
+    async def _execute(context) -> DeviceRegisterResponse:
+        context.ensure_active()
         return register_device(
             db,
             request_device_id=request.device_id,
@@ -78,7 +79,7 @@ async def rotate_device_token_route(
         path=request.url.path,
         idempotency_key=x_idempotency_key,
         request_payload={"device_id": device_id, "action": "rotate"},
-        handler=lambda: rotate_device_token(db, device_id=device_id),
+        handler=lambda context: (context.ensure_active(), rotate_device_token(db, device_id=device_id))[1],
     )
 
 
@@ -96,5 +97,5 @@ async def revoke_device_token_route(
         path=request.url.path,
         idempotency_key=x_idempotency_key,
         request_payload={"device_id": device_id, "action": "revoke"},
-        handler=lambda: revoke_device_token(db, device_id=device_id),
+        handler=lambda context: (context.ensure_active(), revoke_device_token(db, device_id=device_id))[1],
     )

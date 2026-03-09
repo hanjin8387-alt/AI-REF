@@ -48,7 +48,7 @@ async def add_low_stock_suggestions(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> AddShoppingItemsResponse:
+    async def _execute(context) -> AddShoppingItemsResponse:
         try:
             suggestion_response = await get_low_stock_suggestions(
                 lookback_days=lookback_days,
@@ -68,6 +68,7 @@ async def add_low_stock_suggestions(
             if not aggregated:
                 return AddShoppingItemsResponse(success=True, added_count=0, updated_count=0, items=[])
 
+            context.ensure_active()
             added_count, updated_count, touched_rows = upsert_pending_shopping_items(
                 db=db,
                 device_id=device_id,
@@ -78,6 +79,7 @@ async def add_low_stock_suggestions(
             )
 
             if added_count or updated_count:
+                context.ensure_active()
                 create_notification(
                     db=db,
                     device_id=device_id,
@@ -122,7 +124,7 @@ async def add_shopping_items(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> AddShoppingItemsResponse:
+    async def _execute(context) -> AddShoppingItemsResponse:
         try:
             if not request.items:
                 raise HTTPException(
@@ -137,6 +139,7 @@ async def add_shopping_items(
                     detail="No valid item payload provided.",
                 )
 
+            context.ensure_active()
             added_count, updated_count, touched_rows = upsert_pending_shopping_items(
                 db=db,
                 device_id=device_id,
@@ -146,6 +149,7 @@ async def add_shopping_items(
                 recipe_title=request.recipe_title,
             )
 
+            context.ensure_active()
             create_notification(
                 db=db,
                 device_id=device_id,
@@ -190,7 +194,7 @@ async def add_shopping_from_recipe(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> AddShoppingItemsResponse:
+    async def _execute(context) -> AddShoppingItemsResponse:
         try:
             if not request.ingredients:
                 raise HTTPException(
@@ -205,6 +209,7 @@ async def add_shopping_from_recipe(
                     detail="No valid ingredient payload provided.",
                 )
 
+            context.ensure_active()
             added_count, updated_count, touched_rows = upsert_pending_shopping_items(
                 db=db,
                 device_id=device_id,
@@ -214,6 +219,7 @@ async def add_shopping_from_recipe(
                 recipe_title=request.recipe_title,
             )
 
+            context.ensure_active()
             create_notification(
                 db=db,
                 device_id=device_id,
@@ -258,7 +264,7 @@ async def checkout_shopping_items(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> ShoppingCheckoutResponse:
+    async def _execute(context) -> ShoppingCheckoutResponse:
         try:
             query = (
                 db.table("shopping_items")
@@ -284,6 +290,7 @@ async def checkout_shopping_items(
             inventory_items: list[InventoryItem] = []
 
             if request.add_to_inventory:
+                context.ensure_active()
                 added_count, updated_count, inventory_items = apply_inventory_from_shopping(
                     db=db,
                     device_id=device_id,
@@ -297,6 +304,7 @@ async def checkout_shopping_items(
                     "purchased_at": datetime.now(timezone.utc).isoformat(),
                     "added_to_inventory": bool(request.add_to_inventory),
                 }
+                context.ensure_active()
                 (
                     db.table("shopping_items")
                     .update(update_payload)
@@ -306,6 +314,7 @@ async def checkout_shopping_items(
                 )
 
             if request.add_to_inventory:
+                context.ensure_active()
                 schedule_notification(
                     db=db,
                     device_id=device_id,
@@ -319,6 +328,7 @@ async def checkout_shopping_items(
                     },
                 )
             else:
+                context.ensure_active()
                 schedule_notification(
                     db=db,
                     device_id=device_id,
@@ -365,7 +375,7 @@ async def update_shopping_item(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> ShoppingItem:
+    async def _execute(context) -> ShoppingItem:
         try:
             found_rows = (
                 db.table("shopping_items")
@@ -405,6 +415,7 @@ async def update_shopping_item(
             if not updates:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update.")
 
+            context.ensure_active()
             updated = (
                 db.table("shopping_items")
                 .update(updates)
@@ -444,7 +455,7 @@ async def delete_shopping_item(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> ShoppingDeleteResponse:
+    async def _execute(context) -> ShoppingDeleteResponse:
         try:
             found_rows = (
                 db.table("shopping_items")
@@ -459,6 +470,7 @@ async def delete_shopping_item(
             if not found_rows:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping item not found.")
 
+            context.ensure_active()
             db.table("shopping_items").delete().eq("id", item_id).eq("device_id", device_id).execute()
             deleted_item = ShoppingItem(**found_rows[0])
             return ShoppingDeleteResponse(success=True, message="Deleted shopping item.", deleted_item=deleted_item)

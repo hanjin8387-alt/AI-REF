@@ -36,10 +36,11 @@ async def restore_backup_route(
         idempotency_key=x_idempotency_key,
         request_payload=request.model_dump(mode="json"),
         require_key=True,
-        handler=lambda: restore_backup(
+        handler=lambda context: restore_backup(
             db,
             device_id=device_id,
             payload=request.payload,
             mode=request.mode,
+            idempotency_context=context,
         ),
     )

@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     path TEXT NOT NULL,
     idempotency_key VARCHAR(128) NOT NULL,
     request_fingerprint TEXT,
+    claim_token UUID NOT NULL DEFAULT uuid_generate_v4(),
     status VARCHAR(16) NOT NULL DEFAULT 'committed',
     locked_until TIMESTAMPTZ,
     response_status INTEGER,
@@ -269,6 +270,8 @@ CREATE INDEX IF NOT EXISTS idx_recipe_recommendation_jobs_device_updated
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_device_created ON idempotency_keys(device_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotency_keys_unique
     ON idempotency_keys(device_id, method, path, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_claim_token
+    ON idempotency_keys(claim_token);
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_status_locked_until
     ON idempotency_keys(status, locked_until);
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_updated_at
@@ -293,7 +296,8 @@ RETURNS TABLE (
     response_status INTEGER,
     response_headers JSONB,
     response_body JSONB,
-    retry_after_seconds INTEGER
+    retry_after_seconds INTEGER,
+    claim_token UUID
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -305,6 +309,7 @@ DECLARE
     v_expires_at TIMESTAMPTZ := NOW() + make_interval(secs => GREATEST(COALESCE(p_replay_ttl_seconds, 0), 1));
     v_existing idempotency_keys%ROWTYPE;
     v_retry_after INTEGER := 0;
+    v_claim_token UUID := uuid_generate_v4();
 BEGIN
     SELECT *
     INTO v_existing
@@ -322,6 +327,7 @@ BEGIN
             path,
             idempotency_key,
             request_fingerprint,
+            claim_token,
             status,
             locked_until,
             response_status,
@@ -339,6 +345,7 @@ BEGIN
             p_path,
             p_idempotency_key,
             p_request_fingerprint,
+            v_claim_token,
             'in_progress',
             v_locked_until,
             NULL,
@@ -352,7 +359,7 @@ BEGIN
         );
 
         RETURN QUERY
-        SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER;
+        SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER, v_claim_token;
         RETURN;
     END IF;
 
@@ -360,6 +367,7 @@ BEGIN
         UPDATE idempotency_keys
         SET
             request_fingerprint = p_request_fingerprint,
+            claim_token = v_claim_token,
             status = 'in_progress',
             locked_until = v_locked_until,
             response_status = NULL,
@@ -373,7 +381,7 @@ BEGIN
         WHERE id = v_existing.id;
 
         RETURN QUERY
-        SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER;
+        SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER, v_claim_token;
         RETURN;
     END IF;
 
@@ -385,7 +393,8 @@ BEGIN
             v_existing.response_status,
             COALESCE(v_existing.response_headers, '{}'::jsonb),
             COALESCE(v_existing.response_body, '{}'::jsonb),
-            0::INTEGER;
+            0::INTEGER,
+            v_existing.claim_token;
         RETURN;
     END IF;
 
@@ -397,7 +406,8 @@ BEGIN
             v_existing.response_status,
             COALESCE(v_existing.response_headers, '{}'::jsonb),
             COALESCE(v_existing.response_body, '{}'::jsonb),
-            0::INTEGER;
+            0::INTEGER,
+            v_existing.claim_token;
         RETURN;
     END IF;
 
@@ -412,13 +422,15 @@ BEGIN
             v_existing.response_status,
             COALESCE(v_existing.response_headers, '{}'::jsonb),
             COALESCE(v_existing.response_body, '{}'::jsonb),
-            v_retry_after;
+            v_retry_after,
+            v_existing.claim_token;
         RETURN;
     END IF;
 
     UPDATE idempotency_keys
     SET
         request_fingerprint = p_request_fingerprint,
+        claim_token = v_claim_token,
         status = 'in_progress',
         locked_until = v_locked_until,
         response_status = NULL,
@@ -431,7 +443,7 @@ BEGIN
     WHERE id = v_existing.id;
 
     RETURN QUERY
-    SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER;
+    SELECT 'started'::TEXT, 'in_progress'::TEXT, NULL::INTEGER, '{}'::jsonb, '{}'::jsonb, 0::INTEGER, v_claim_token;
 END;
 $$;
 
@@ -441,6 +453,7 @@ CREATE OR REPLACE FUNCTION commit_idempotency_key(
     p_path TEXT,
     p_idempotency_key VARCHAR,
     p_request_fingerprint TEXT,
+    p_claim_token UUID,
     p_response_status INTEGER,
     p_response_headers JSONB,
     p_response_body JSONB,
@@ -470,6 +483,8 @@ BEGIN
       AND method = UPPER(p_method)
       AND path = p_path
       AND idempotency_key = p_idempotency_key
+      AND status = 'in_progress'
+      AND claim_token = p_claim_token
       AND COALESCE(request_fingerprint, '') = COALESCE(p_request_fingerprint, '');
 
     RETURN FOUND;
@@ -482,6 +497,7 @@ CREATE OR REPLACE FUNCTION fail_idempotency_key(
     p_path TEXT,
     p_idempotency_key VARCHAR,
     p_request_fingerprint TEXT,
+    p_claim_token UUID,
     p_failure_code VARCHAR DEFAULT NULL,
     p_failure_message TEXT DEFAULT NULL
 )
@@ -505,6 +521,8 @@ BEGIN
       AND method = UPPER(p_method)
       AND path = p_path
       AND idempotency_key = p_idempotency_key
+      AND status = 'in_progress'
+      AND claim_token = p_claim_token
       AND COALESCE(request_fingerprint, '') = COALESCE(p_request_fingerprint, '');
 
     RETURN FOUND;
@@ -549,9 +567,9 @@ GRANT EXECUTE ON FUNCTION increment_legacy_auth_event_counter(VARCHAR, VARCHAR, 
 TO service_role;
 GRANT EXECUTE ON FUNCTION claim_idempotency_key(VARCHAR, VARCHAR, TEXT, VARCHAR, TEXT, INTEGER, INTEGER)
 TO service_role;
-GRANT EXECUTE ON FUNCTION commit_idempotency_key(VARCHAR, VARCHAR, TEXT, VARCHAR, TEXT, INTEGER, JSONB, JSONB, INTEGER)
+GRANT EXECUTE ON FUNCTION commit_idempotency_key(VARCHAR, VARCHAR, TEXT, VARCHAR, TEXT, UUID, INTEGER, JSONB, JSONB, INTEGER)
 TO service_role;
-GRANT EXECUTE ON FUNCTION fail_idempotency_key(VARCHAR, VARCHAR, TEXT, VARCHAR, TEXT, VARCHAR, TEXT)
+GRANT EXECUTE ON FUNCTION fail_idempotency_key(VARCHAR, VARCHAR, TEXT, VARCHAR, TEXT, UUID, VARCHAR, TEXT)
 TO service_role;
 
 CREATE OR REPLACE FUNCTION restore_device_backup_payload(
@@ -660,6 +678,8 @@ BEGIN
     INSERT INTO shopping_items (
         device_id,
         name,
+        name_normalized,
+        name_normalization_version,
         quantity,
         unit,
         status,
@@ -674,6 +694,11 @@ BEGIN
     SELECT
         p_device_id,
         x.name,
+        COALESCE(
+            NULLIF(BTRIM(x.name_normalized), ''),
+            lower(regexp_replace(BTRIM(x.name), '\s+', ' ', 'g'))
+        ),
+        COALESCE(x.name_normalization_version, 2),
         COALESCE(x.quantity, 0),
         COALESCE(NULLIF(BTRIM(x.unit), ''), U&'\AC1C'),
         COALESCE(NULLIF(BTRIM(x.status), ''), 'pending'),
@@ -686,6 +711,8 @@ BEGIN
         COALESCE(x.updated_at, NOW())
     FROM jsonb_to_recordset(COALESCE(v_payload -> 'shopping_items', '[]'::jsonb)) AS x(
         name TEXT,
+        name_normalized TEXT,
+        name_normalization_version INTEGER,
         quantity NUMERIC,
         unit TEXT,
         status TEXT,

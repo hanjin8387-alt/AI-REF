@@ -91,7 +91,7 @@ async def bulk_add_inventory(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> BulkInventoryResponse:
+    async def _execute(context) -> BulkInventoryResponse:
         if not request.items:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,11 +109,13 @@ async def bulk_add_inventory(
             for item in request.items
         ]
 
+        context.ensure_active()
         added_count, updated_count, items = bulk_upsert_inventory(db, device_id, raw_items)
 
         if added_count == 0 and updated_count == 0:
             return BulkInventoryResponse(success=True, added_count=0, updated_count=0, items=[])
 
+        context.ensure_active()
         create_notification(
             db=db,
             device_id=device_id,
@@ -150,7 +152,7 @@ async def update_inventory_item(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> InventoryItem:
+    async def _execute(context) -> InventoryItem:
         existing = (
             db.table("inventory")
             .eq("id", item_id)
@@ -185,6 +187,7 @@ async def update_inventory_item(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update.")
 
         try:
+            context.ensure_active()
             updated = (
                 db.table("inventory")
                 .update(updates)
@@ -203,6 +206,7 @@ async def update_inventory_item(
         old_qty = float(existing.data.get("quantity", 0))
         new_qty = float(result.quantity)
         if old_qty != new_qty:
+            context.ensure_active()
             log_inventory_change(
                 db, device_id, result.name, "update",
                 quantity_change=round(new_qty - old_qty, 2),
@@ -229,7 +233,7 @@ async def delete_inventory_item(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> InventoryDeleteResponse:
+    async def _execute(context) -> InventoryDeleteResponse:
         existing_result = (
             db.table("inventory")
             .select(INVENTORY_SELECT_COLUMNS)
@@ -243,6 +247,7 @@ async def delete_inventory_item(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
 
         try:
+            context.ensure_active()
             db.table("inventory").delete().eq("id", item_id).eq("device_id", device_id).execute()
         except Exception as exc:
             logger.exception("inventory delete failed item_id=%s device_id=%s", item_id, device_id)
@@ -250,6 +255,7 @@ async def delete_inventory_item(
 
         deleted_item = InventoryItem(**existing_rows[0])
 
+        context.ensure_active()
         log_inventory_change(
             db, device_id, deleted_item.name, "delete",
             quantity_change=-deleted_item.quantity,
@@ -290,7 +296,7 @@ async def restore_inventory_item(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> InventoryItem:
+    async def _execute(context) -> InventoryItem:
         name = request.name.strip()
         if not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
@@ -309,6 +315,7 @@ async def restore_inventory_item(
         normalized_category = normalize_storage_category(request.category)
         if existing.data:
             row = existing.data[0]
+            context.ensure_active()
             updated = (
                 db.table("inventory")
                 .update(
@@ -329,6 +336,7 @@ async def restore_inventory_item(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to restore inventory item.")
             restored = InventoryItem(**updated.data[0])
         else:
+            context.ensure_active()
             inserted = (
                 db.table("inventory")
                 .insert(
@@ -349,6 +357,7 @@ async def restore_inventory_item(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to restore inventory item.")
             restored = InventoryItem(**inserted.data[0])
 
+        context.ensure_active()
         log_inventory_change(
             db, device_id, restored.name, "restore",
             quantity_change=float(request.quantity),

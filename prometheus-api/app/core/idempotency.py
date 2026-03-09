@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from typing import Any, Awaitable, Callable, TypeVar
@@ -40,6 +40,41 @@ class IdempotencyClaim:
     response_headers: dict[str, str]
     response_body: Any
     retry_after_seconds: int
+    claim_token: str | None = None
+
+
+@dataclass(frozen=True)
+class IdempotencyExecutionContext:
+    db: Client
+    device_id: str
+    method: str
+    path: str
+    idempotency_key: str
+    request_fingerprint: str
+    claim_token: str
+
+    def is_active(self) -> bool:
+        row = _load_idempotency_row(
+            self.db,
+            device_id=self.device_id,
+            method=self.method,
+            path=self.path,
+            idempotency_key=self.idempotency_key,
+        )
+        return bool(
+            row
+            and str(row.get("status") or "") == "in_progress"
+            and str(row.get("request_fingerprint") or "") == self.request_fingerprint
+            and str(row.get("claim_token") or "") == self.claim_token
+        )
+
+    def ensure_active(self) -> None:
+        if not self.is_active():
+            raise IdempotencyLeaseLostError("Idempotency lease lost before side effect.")
+
+
+class IdempotencyLeaseLostError(RuntimeError):
+    """Raised when a stale attempt loses the active lease before mutating state."""
 
 
 def _is_missing_table_error(exc: Exception) -> bool:
@@ -113,6 +148,29 @@ def _coerce_bool_result(data: Any, function_name: str) -> bool:
     return bool(data)
 
 
+def _coerce_row_payload(data: Any) -> dict[str, Any] | None:
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                return item
+    return None
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _claim_rpc(
     db: Client,
     *,
@@ -155,6 +213,7 @@ def _claim_rpc(
         response_headers=_coerce_headers(payload.get("response_headers")),
         response_body=payload.get("response_body") if payload.get("response_body") is not None else {},
         retry_after_seconds=max(int(payload.get("retry_after_seconds") or 0), 0),
+        claim_token=str(payload.get("claim_token") or "").strip() or None,
     )
 
 
@@ -166,6 +225,7 @@ def _commit_rpc(
     path: str,
     idempotency_key: str,
     request_fingerprint: str,
+    claim_token: str,
     response_status: int,
     response_headers: dict[str, str],
     response_body: Any,
@@ -180,6 +240,7 @@ def _commit_rpc(
                 "p_path": path,
                 "p_idempotency_key": idempotency_key,
                 "p_request_fingerprint": request_fingerprint,
+                "p_claim_token": claim_token,
                 "p_response_status": int(response_status),
                 "p_response_headers": _normalize_json(response_headers),
                 "p_response_body": _normalize_json(response_body),
@@ -205,11 +266,12 @@ def _fail_rpc(
     path: str,
     idempotency_key: str,
     request_fingerprint: str,
+    claim_token: str,
     failure_code: str | None,
     failure_message: str | None,
-) -> None:
+) -> bool:
     try:
-        db.rpc(
+        rpc_result = db.rpc(
             IDEMPOTENCY_FAIL_RPC,
             {
                 "p_device_id": device_id,
@@ -217,6 +279,7 @@ def _fail_rpc(
                 "p_path": path,
                 "p_idempotency_key": idempotency_key,
                 "p_request_fingerprint": request_fingerprint,
+                "p_claim_token": claim_token,
                 "p_failure_code": failure_code,
                 "p_failure_message": failure_message,
             },
@@ -228,6 +291,83 @@ def _fail_rpc(
                 detail="Idempotency store is not initialized. Apply migrations first.",
             ) from exc
         raise
+    return _coerce_bool_result(getattr(rpc_result, "data", None), "fail_idempotency_key")
+
+
+def _load_idempotency_row(
+    db: Client,
+    *,
+    device_id: str,
+    method: str,
+    path: str,
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    try:
+        query_result = (
+            db.table(IDEMPOTENCY_TABLE)
+            .select(
+                "status,request_fingerprint,claim_token,locked_until,response_status,response_headers,response_body"
+            )
+            .eq("device_id", device_id)
+            .eq("method", method.upper())
+            .eq("path", path)
+            .eq("idempotency_key", idempotency_key)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Idempotency store is not initialized. Apply migrations first.",
+            ) from exc
+        raise
+    return _coerce_row_payload(getattr(query_result, "data", None))
+
+
+def _claim_from_row(row: dict[str, Any]) -> IdempotencyClaim:
+    locked_until = _parse_timestamp(row.get("locked_until"))
+    retry_after_seconds = 0
+    if str(row.get("status") or "") == "in_progress" and locked_until is not None:
+        retry_after_seconds = max(int((locked_until - datetime.now(timezone.utc)).total_seconds()), 0)
+    response_status = row.get("response_status")
+    return IdempotencyClaim(
+        action=IdempotencyAction.REPLAY if str(row.get("status") or "") == "committed" else IdempotencyAction.IN_PROGRESS,
+        status=str(row.get("status") or ""),
+        response_status=int(response_status) if response_status is not None else None,
+        response_headers=_coerce_headers(row.get("response_headers")),
+        response_body=row.get("response_body") if row.get("response_body") is not None else {},
+        retry_after_seconds=retry_after_seconds,
+        claim_token=str(row.get("claim_token") or "").strip() or None,
+    )
+
+
+def _resolve_superseded_attempt(
+    db: Client,
+    *,
+    device_id: str,
+    method: str,
+    path: str,
+    idempotency_key: str,
+    request_fingerprint: str,
+) -> JSONResponse:
+    row = _load_idempotency_row(
+        db,
+        device_id=device_id,
+        method=method,
+        path=path,
+        idempotency_key=idempotency_key,
+    )
+    if not row:
+        raise RuntimeError("Idempotency claim was superseded before the winning attempt was recorded.")
+    if str(row.get("request_fingerprint") or "") != request_fingerprint:
+        _raise_conflict()
+    current = _claim_from_row(row)
+    if current.status == "committed":
+        return _replay_response(current)
+    if current.status == "in_progress":
+        _raise_in_progress(current.retry_after_seconds)
+    raise RuntimeError("Idempotency claim was superseded before a committed result became available.")
 
 
 def _replay_response(claim: IdempotencyClaim) -> JSONResponse:
@@ -295,8 +435,19 @@ def _response_headers(result: Any) -> dict[str, str]:
     return headers
 
 
-async def _invoke_handler(handler: Callable[[], T | Awaitable[T]]) -> T:
-    result = handler()
+def _handler_accepts_context(handler: Callable[..., T | Awaitable[T]]) -> bool:
+    params = inspect.signature(handler).parameters.values()
+    for param in params:
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+            return True
+    return False
+
+
+async def _invoke_handler(
+    handler: Callable[..., T | Awaitable[T]],
+    context: IdempotencyExecutionContext | None = None,
+) -> T:
+    result = handler(context) if context is not None and _handler_accepts_context(handler) else handler()
     if inspect.isawaitable(result):
         return await result
     return result
@@ -328,7 +479,7 @@ async def execute_idempotent_mutation(
     path: str,
     idempotency_key: str | None,
     request_payload: Any,
-    handler: Callable[[], T | Awaitable[T]],
+    handler: Callable[..., T | Awaitable[T]],
     require_key: bool = False,
     default_status_code: int = status.HTTP_200_OK,
     lock_ttl_seconds: int = IDEMPOTENCY_LOCK_TTL_SECONDS,
@@ -358,9 +509,21 @@ async def execute_idempotent_mutation(
         _raise_in_progress(claim.retry_after_seconds)
     if claim.action == IdempotencyAction.CONFLICT:
         _raise_conflict()
+    claim_token = (claim.claim_token or "").strip()
+    if not claim_token:
+        raise RuntimeError("Idempotency claim did not return an active claim token.")
+    context = IdempotencyExecutionContext(
+        db=db,
+        device_id=device_id,
+        method=method,
+        path=path,
+        idempotency_key=key,
+        request_fingerprint=request_fingerprint,
+        claim_token=claim_token,
+    )
 
     try:
-        result = await _invoke_handler(handler)
+        result = await _invoke_handler(handler, context)
         committed = _commit_rpc(
             db,
             device_id=device_id,
@@ -368,35 +531,63 @@ async def execute_idempotent_mutation(
             path=path,
             idempotency_key=key,
             request_fingerprint=request_fingerprint,
+            claim_token=claim_token,
             response_status=_response_status(result, default_status_code),
             response_headers=_response_headers(result),
             response_body=_response_payload(result),
             replay_ttl_seconds=replay_ttl_seconds,
         )
         if not committed:
-            raise RuntimeError("Idempotency commit failed.")
+            return _resolve_superseded_attempt(
+                db,
+                device_id=device_id,
+                method=method,
+                path=path,
+                idempotency_key=key,
+                request_fingerprint=request_fingerprint,
+            )
         return result
     except HTTPException as exc:
-        _fail_rpc(
+        failed = _fail_rpc(
             db,
             device_id=device_id,
             method=method,
             path=path,
             idempotency_key=key,
             request_fingerprint=request_fingerprint,
+            claim_token=claim_token,
             failure_code=_failure_code_from_http_exception(exc),
             failure_message=_failure_message_from_http_exception(exc),
         )
+        if not failed:
+            return _resolve_superseded_attempt(
+                db,
+                device_id=device_id,
+                method=method,
+                path=path,
+                idempotency_key=key,
+                request_fingerprint=request_fingerprint,
+            )
         raise
     except Exception as exc:
-        _fail_rpc(
+        failed = _fail_rpc(
             db,
             device_id=device_id,
             method=method,
             path=path,
             idempotency_key=key,
             request_fingerprint=request_fingerprint,
+            claim_token=claim_token,
             failure_code="mutation_failed",
             failure_message=str(exc),
         )
+        if not failed:
+            return _resolve_superseded_attempt(
+                db,
+                device_id=device_id,
+                method=method,
+                path=path,
+                idempotency_key=key,
+                request_fingerprint=request_fingerprint,
+            )
         raise

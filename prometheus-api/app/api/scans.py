@@ -245,7 +245,7 @@ async def upload_scan(
     image_bytes = b"".join(chunks)
     original_filename = _normalize_original_filename(file.filename)
 
-    async def _execute() -> ScanUploadResponse:
+    async def _execute(context) -> ScanUploadResponse:
         scan_id = str(uuid.uuid4())
 
         try:
@@ -256,6 +256,7 @@ async def upload_scan(
                 "status": ScanStatus.PROCESSING.value,
                 "original_filename": original_filename,
             }
+            context.ensure_active()
             try:
                 db.table("scans").insert(scan_row).execute()
             except Exception as insert_exc:
@@ -263,6 +264,7 @@ async def upload_scan(
                     raise
                 logger.warning("scan filename exceeded DB column length; retrying with fallback filename")
                 scan_row["original_filename"] = DEFAULT_SCAN_FILENAME
+                context.ensure_active()
                 db.table("scans").insert(scan_row).execute()
 
             raw_text = None
@@ -274,6 +276,7 @@ async def upload_scan(
             items = _extract_item_prices(_enrich_scan_items_with_storage(items), raw_text)
             receipt_store, receipt_purchased_on = _extract_receipt_metadata(raw_text)
 
+            context.ensure_active()
             db.table("scans").update(
                 {
                     "status": ScanStatus.COMPLETED.value,
@@ -283,6 +286,7 @@ async def upload_scan(
             ).eq("id", scan_id).eq("device_id", device_id).execute()
 
             if source_type == ScanSourceType.RECEIPT:
+                context.ensure_active()
                 _persist_price_history(
                     db,
                     device_id=device_id,
@@ -302,12 +306,13 @@ async def upload_scan(
             )
         except GeminiContractError as exc:
             logger.exception("scan upload failed due to gemini contract scan_id=%s device_id=%s", scan_id, device_id)
-            db.table("scans").update(
-                {
-                    "status": ScanStatus.FAILED.value,
-                    "error_message": "AI response validation failed.",
-                }
-            ).eq("id", scan_id).eq("device_id", device_id).execute()
+            if context.is_active():
+                db.table("scans").update(
+                    {
+                        "status": ScanStatus.FAILED.value,
+                        "error_message": "AI response validation failed.",
+                    }
+                ).eq("id", scan_id).eq("device_id", device_id).execute()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
@@ -321,12 +326,13 @@ async def upload_scan(
             raise
         except Exception as exc:
             logger.exception("scan upload failed scan_id=%s device_id=%s", scan_id, device_id)
-            db.table("scans").update(
-                {
-                    "status": ScanStatus.FAILED.value,
-                    "error_message": "스캔 처리에 실패했어요.",
-                }
-            ).eq("id", scan_id).eq("device_id", device_id).execute()
+            if context.is_active():
+                db.table("scans").update(
+                    {
+                        "status": ScanStatus.FAILED.value,
+                        "error_message": "스캔 처리에 실패했어요.",
+                    }
+                ).eq("id", scan_id).eq("device_id", device_id).execute()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to analyze scan image.",

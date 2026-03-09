@@ -279,9 +279,10 @@ async def create_recommendation_job(
     gemini: GeminiService = Depends(get_gemini_service),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    async def _execute() -> RecommendationJobCreateResponse:
+    async def _execute(context) -> RecommendationJobCreateResponse:
         job_id = str(uuid4())
         _recommendation_job_cleanup(db)
+        context.ensure_active()
         _recommendation_job_upsert(
             db,
             job_id=job_id,
@@ -413,7 +414,7 @@ async def add_favorite_recipe(
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    async def _execute() -> FavoriteToggleResponse:
+    async def _execute(context) -> FavoriteToggleResponse:
         recipe: Recipe | None = None
 
         if request.recipe:
@@ -429,6 +430,7 @@ async def add_favorite_recipe(
                 detail="Recipe payload is required to save generated recommendations.",
             )
 
+        context.ensure_active()
         db.table("favorite_recipes").upsert(
             {
                 "device_id": device_id,
@@ -460,7 +462,8 @@ async def remove_favorite_recipe(
     device_id: str = Depends(require_device_auth),
     db: Client = Depends(get_db),
 ):
-    async def _execute() -> FavoriteToggleResponse:
+    async def _execute(context) -> FavoriteToggleResponse:
+        context.ensure_active()
         db.table("favorite_recipes").delete().eq("device_id", device_id).eq("recipe_id", recipe_id).execute()
         return FavoriteToggleResponse(success=True, is_favorite=False, message="즐겨찾기에서 제거했어요.")
 
@@ -547,7 +550,7 @@ async def complete_cooking(
     db: Client = Depends(get_db),
     recipe_cache: RecipeCacheProtocol = Depends(get_recipe_cache),
 ):
-    async def _execute() -> CookCompleteResponse:
+    async def _execute(context) -> CookCompleteResponse:
         if request.servings <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Servings must be at least 1.")
 
@@ -613,6 +616,7 @@ async def complete_cooking(
         recipe_uuid = recipe.id if is_valid_uuid(recipe.id) else None
         history_id = None
         try:
+            context.ensure_active()
             rpc_result = db.rpc(
                 "complete_cooking_transaction",
                 {
@@ -657,12 +661,14 @@ async def complete_cooking(
         recipe_cache.invalidate_device(device_id)
 
         for item in deducted_items:
+            context.ensure_active()
             log_inventory_change(
                 db, device_id, item["name"], "cook",
                 quantity_change=-item["deducted"],
                 metadata={"recipe_title": recipe.title, "recipe_id": recipe.id},
             )
 
+        context.ensure_active()
         create_notification(
             db=db,
             device_id=device_id,
